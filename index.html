@@ -100,6 +100,14 @@
   .toast.error { background: var(--rouge); }
   .loading { text-align: center; padding: 20px; color: var(--texte-gris); font-size: 0.85rem; }
 
+  .preview-match { display: flex; align-items: center; gap: 10px; background: #252525; border-radius: 8px; padding: 10px 12px; margin-top: 6px; }
+  .preview-match input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--vert-clair); }
+  .preview-match-info { flex: 1; font-size: 0.83rem; }
+  .preview-match-teams { font-weight: 600; }
+  .preview-match-time { color: var(--texte-gris); font-size: 0.74rem; }
+  .preview-already { opacity: 0.45; }
+  .preview-already-tag { font-size: 0.68rem; color: var(--texte-gris); background: #333; padding: 2px 7px; border-radius: 6px; }
+
   .attaque-card { background: var(--gris2); border-radius: 10px; padding: 14px; margin-bottom: 12px; border-left: 3px solid var(--rouge); }
   .attaque-card.choisie { border-left-color: var(--or); }
   .attaque-card.fermee { opacity: 0.6; border-left-color: #444; }
@@ -162,12 +170,21 @@
 
   <div id="matchs" class="section active">
     <div class="card" id="admin-import-api" style="display:none">
-      <h3>🌐 Importer depuis la Ligue 1 (auto)</h3>
+      <h3>🌐 Importer des matchs (auto)</h3>
       <div class="input-row">
-        <input type="number" id="journee-api-input" placeholder="N° journée Ligue 1" min="1" style="flex:1">
-        <button class="btn btn-or" onclick="importerJournee()">📥 Importer</button>
+        <select id="champ-select" class="cible-select" style="flex:1;margin-bottom:0">
+          <option value="FL1">🇫🇷 Ligue 1</option>
+          <option value="PL">🏴 Premier League</option>
+          <option value="PD">🇪🇸 Liga</option>
+          <option value="BL1">🇩🇪 Bundesliga</option>
+          <option value="SA">🇮🇹 Serie A</option>
+          <option value="CL">🏆 Champions League</option>
+        </select>
+        <input type="number" id="journee-api-input" placeholder="N° journée" min="1" style="flex:1">
       </div>
-      <div id="import-status" style="font-size:0.78rem;color:var(--texte-gris);margin-top:6px"></div>
+      <button class="btn btn-or btn-full" onclick="chercherMatchsAPI()">🔍 Chercher les matchs</button>
+      <div id="import-status" style="font-size:0.78rem;color:var(--texte-gris);margin-top:8px"></div>
+      <div id="import-preview"></div>
     </div>
     <div class="card" id="admin-add-match" style="display:none">
       <h3>Ajouter un match manuellement</h3>
@@ -402,47 +419,82 @@ function formatHeure(iso) {
 }
 
 // ---- ADMIN: AJOUT MATCH ----
-// ---- IMPORT DEPUIS L'API LIGUE 1 ----
-window.importerJournee = async function() {
+// ---- IMPORT DEPUIS L'API (multi-championnats) ----
+let dernierResultatAPI = [];
+
+const NOMS_COMP = { FL1: 'Ligue 1', PL: 'Premier League', PD: 'Liga', BL1: 'Bundesliga', SA: 'Serie A', CL: 'Champions League' };
+
+window.chercherMatchsAPI = async function() {
   if (!currentUserData.isAdmin) return;
+  const competition = document.getElementById('champ-select').value;
   const journee = document.getElementById('journee-api-input').value.trim();
   const statusEl = document.getElementById('import-status');
+  const previewEl = document.getElementById('import-preview');
   if (!journee) { toast('Entre un numéro de journée', true); return; }
-  statusEl.textContent = '⏳ Récupération des matchs...';
+  statusEl.textContent = '⏳ Recherche des matchs...';
+  previewEl.innerHTML = '';
   try {
-    const res = await fetch(`/.netlify/functions/get-matches?competition=FL1&matchday=${journee}`);
+    const res = await fetch(`/.netlify/functions/get-matches?competition=${competition}&matchday=${journee}`);
     const data = await res.json();
     if (data.error) { statusEl.textContent = '❌ ' + data.error; return; }
-    if (!data.matchs || !data.matchs.length) { statusEl.textContent = '❌ Aucun match trouvé pour cette journée'; return; }
+    if (!data.matchs || !data.matchs.length) { statusEl.textContent = '❌ Aucun match trouvé'; return; }
 
-    let ajoutes = 0;
-    for (const m of data.matchs) {
-      // Évite les doublons : on vérifie si un match avec le même id API existe déjà
-      const existant = matchs.find(x => x.apiId === m.id);
-      if (existant) continue;
-      await push(ref(db, 'matchs'), {
-        dom: m.dom, ext: m.ext, comp: 'Ligue 1', journee: String(m.journee),
-        heure: m.heure, apiId: m.id,
-        scoreDom: m.scoreDom ?? null, scoreExt: m.scoreExt ?? null
-      });
-      ajoutes++;
+    dernierResultatAPI = data.matchs.map(m => ({ ...m, competition }));
+    statusEl.textContent = `✅ ${data.matchs.length} match(s) trouvé(s) — coche ceux à importer :`;
+
+    previewEl.innerHTML = dernierResultatAPI.map((m, i) => {
+      const dejaImporte = matchs.some(x => x.apiId === m.id);
+      return `
+      <div class="preview-match ${dejaImporte ? 'preview-already' : ''}">
+        ${dejaImporte
+          ? '<span class="preview-already-tag">Déjà ajouté</span>'
+          : `<input type="checkbox" id="chk-${i}" checked>`}
+        <div class="preview-match-info">
+          <div class="preview-match-teams">${m.dom} vs ${m.ext}</div>
+          <div class="preview-match-time">${formatHeure(m.heure)}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    if (dernierResultatAPI.some(m => !matchs.some(x => x.apiId === m.id))) {
+      previewEl.innerHTML += `<button class="btn btn-vert btn-full" style="margin-top:10px" onclick="importerSelection()">📥 Importer la sélection</button>`;
     }
-    statusEl.textContent = `✅ ${ajoutes} match(s) importé(s) !`;
-    toast(`✅ ${ajoutes} matchs ajoutés depuis la Ligue 1`);
   } catch (e) {
     statusEl.textContent = '❌ Erreur de connexion à l\'API';
   }
+}
+
+window.importerSelection = async function() {
+  const statusEl = document.getElementById('import-status');
+  let ajoutes = 0;
+  for (let i = 0; i < dernierResultatAPI.length; i++) {
+    const chk = document.getElementById(`chk-${i}`);
+    if (!chk || !chk.checked) continue;
+    const m = dernierResultatAPI[i];
+    const existant = matchs.find(x => x.apiId === m.id);
+    if (existant) continue;
+    await push(ref(db, 'matchs'), {
+      dom: m.dom, ext: m.ext, comp: NOMS_COMP[m.competition] || m.competition,
+      journee: String(m.journee), heure: m.heure, apiId: m.id, apiComp: m.competition,
+      scoreDom: m.scoreDom ?? null, scoreExt: m.scoreExt ?? null
+    });
+    ajoutes++;
+  }
+  statusEl.textContent = `✅ ${ajoutes} match(s) importé(s) !`;
+  document.getElementById('import-preview').innerHTML = '';
+  toast(`✅ ${ajoutes} matchs ajoutés`);
 }
 
 // Actualise automatiquement les scores des matchs déjà importés depuis l'API
 async function actualiserScoresAPI() {
   const matchsApi = matchs.filter(m => m.apiId && (m.scoreDom === null || m.scoreDom === undefined));
   if (!matchsApi.length) return;
-  // On regroupe par journée pour limiter les appels
-  const journees = [...new Set(matchsApi.map(m => m.journee))];
-  for (const journee of journees) {
+  // On regroupe par compétition + journée pour limiter les appels
+  const combos = [...new Set(matchsApi.map(m => `${m.apiComp || 'FL1'}|${m.journee}`))];
+  for (const combo of combos) {
+    const [competition, journee] = combo.split('|');
     try {
-      const res = await fetch(`/.netlify/functions/get-matches?competition=FL1&matchday=${journee}`);
+      const res = await fetch(`/.netlify/functions/get-matches?competition=${competition}&matchday=${journee}`);
       const data = await res.json();
       if (!data.matchs) continue;
       for (const apiMatch of data.matchs) {
