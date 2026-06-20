@@ -179,6 +179,7 @@
           <option value="BL1">🇩🇪 Bundesliga</option>
           <option value="SA">🇮🇹 Serie A</option>
           <option value="CL">🏆 Champions League</option>
+          <option value="WC">🌍 Coupe du Monde 2026</option>
         </select>
         <input type="number" id="journee-api-input" placeholder="N° journée" min="1" style="flex:1">
       </div>
@@ -422,7 +423,7 @@ function formatHeure(iso) {
 // ---- IMPORT DEPUIS L'API (multi-championnats) ----
 let dernierResultatAPI = [];
 
-const NOMS_COMP = { FL1: 'Ligue 1', PL: 'Premier League', PD: 'Liga', BL1: 'Bundesliga', SA: 'Serie A', CL: 'Champions League' };
+const NOMS_COMP = { FL1: 'Ligue 1', PL: 'Premier League', PD: 'Liga', BL1: 'Bundesliga', SA: 'Serie A', CL: 'Champions League', WC: 'Coupe du Monde' };
 
 window.chercherMatchsAPI = async function() {
   if (!currentUserData.isAdmin) return;
