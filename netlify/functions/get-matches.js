@@ -8,13 +8,16 @@ exports.handler = async function (event, context) {
     };
   }
 
-  const competition = (event.queryStringParameters && event.queryStringParameters.competition) || "FL1";
-  const matchday = event.queryStringParameters && event.queryStringParameters.matchday;
+  const params = event.queryStringParameters || {};
+  const competition = params.competition || "FL1";
+  const matchday = params.matchday;
+  const stage = params.stage;
 
   let url = `https://api.football-data.org/v4/competitions/${competition}/matches`;
-  if (matchday) {
-    url += `?matchday=${matchday}`;
-  }
+  const queryParts = [];
+  if (matchday) queryParts.push(`matchday=${matchday}`);
+  if (stage) queryParts.push(`stage=${stage}`);
+  if (queryParts.length) url += `?${queryParts.join('&')}`;
 
   try {
     const response = await fetch(url, {
@@ -34,6 +37,7 @@ exports.handler = async function (event, context) {
     const matchs = (data.matches || []).map((m) => ({
       id: m.id,
       journee: m.matchday,
+      stage: m.stage,
       dom: m.homeTeam.shortName || m.homeTeam.name,
       ext: m.awayTeam.shortName || m.awayTeam.name,
       heure: m.utcDate,
