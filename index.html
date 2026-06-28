@@ -842,11 +842,23 @@ function renderClassement() {
 // ---- JOUEURS ----
 function renderJoueurs() {
   const el = document.getElementById('joueurs-liste');
-  const entries = Object.values(joueursMap);
+  const entries = Object.entries(joueursMap);
   if (!entries.length) { el.innerHTML = '<div class="empty-state"><span>👥</span>Aucun joueur inscrit</div>'; return; }
-  el.innerHTML = entries.map(j =>
-    `<span class="joueur-tag">⚽ ${j.pseudo}${j.isAdmin ? '<span class="admin-badge">ADMIN</span>' : ''}</span>`
+  el.innerHTML = entries.map(([uid, j]) => `
+    <div style="display:inline-flex;align-items:center;gap:6px;background:var(--gris2);border:1px solid #444;border-radius:20px;padding:5px 11px;margin:3px;font-size:0.83rem">
+      ⚽ ${j.pseudo}${j.isAdmin ? '<span class="admin-badge">ADMIN</span>' : ''}
+      ${currentUserData.isAdmin && uid !== currentUser.uid
+        ? `<button onclick="supprimerJoueur('${uid}','${j.pseudo}')" style="background:none;border:none;color:var(--rouge);cursor:pointer;font-size:1rem;padding:0;margin-left:4px">✕</button>`
+        : ''}
+    </div>`
   ).join('');
+}
+
+window.supprimerJoueur = async function(uid, pseudo) {
+  if (!currentUserData.isAdmin) return;
+  if (!confirm(`Supprimer ${pseudo} ? Cette action est irréversible.`)) return;
+  await remove(ref(db, `joueurs/${uid}`));
+  toast(`🗑️ ${pseudo} supprimé`);
 }
 </script>
 </body>
