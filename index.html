@@ -189,6 +189,7 @@
         <input type="number" id="journee-api-input" placeholder="N° journée" min="1" style="flex:1">
       </div>
       <button class="btn btn-or btn-full" onclick="chercherMatchsAPI()">🔍 Chercher les matchs</button>
+      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="actualiserManuellement()">🔄 Actualiser les scores des matchs terminés</button>
       <div id="import-status" style="font-size:0.78rem;color:var(--texte-gris);margin-top:8px"></div>
       <div id="import-preview"></div>
     </div>
@@ -489,6 +490,15 @@ window.importerSelection = async function() {
   statusEl.textContent = `✅ ${ajoutes} match(s) importé(s) !`;
   document.getElementById('import-preview').innerHTML = '';
   toast(`✅ ${ajoutes} matchs ajoutés`);
+}
+
+// Bouton manuel pour forcer l'actualisation des scores
+window.actualiserManuellement = async function() {
+  const statusEl = document.getElementById('import-status');
+  statusEl.textContent = '⏳ Actualisation des scores en cours...';
+  await actualiserScoresAPI();
+  statusEl.textContent = '✅ Scores actualisés !';
+  setTimeout(() => statusEl.textContent = '', 3000);
 }
 
 // Actualise automatiquement les scores des matchs déjà importés depuis l'API
