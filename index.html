@@ -177,7 +177,7 @@
     <div class="card" id="admin-import-api" style="display:none">
       <h3>🌐 Importer des matchs (auto)</h3>
       <div class="input-row">
-        <select id="champ-select" class="cible-select" style="flex:1;margin-bottom:0">
+        <select id="champ-select" class="cible-select" style="flex:1;margin-bottom:0" onchange="onChampChange()">
           <option value="FL1">🇫🇷 Ligue 1</option>
           <option value="PL">🏴 Premier League</option>
           <option value="PD">🇪🇸 Liga</option>
@@ -186,7 +186,19 @@
           <option value="CL">🏆 Champions League</option>
           <option value="WC">🌍 Coupe du Monde 2026</option>
         </select>
+      </div>
+      <div class="input-row" id="journee-row">
         <input type="number" id="journee-api-input" placeholder="N° journée" min="1" style="flex:1">
+      </div>
+      <div class="input-row" id="stage-row" style="display:none">
+        <select id="stage-select" class="cible-select" style="flex:1;margin-bottom:0">
+          <option value="GROUP_STAGE">Phase de groupes</option>
+          <option value="ROUND_OF_32">32èmes de finale</option>
+          <option value="ROUND_OF_16">16èmes de finale</option>
+          <option value="QUARTER_FINALS">Quarts de finale</option>
+          <option value="SEMI_FINALS">Demi-finales</option>
+          <option value="FINAL">Finale</option>
+        </select>
       </div>
       <button class="btn btn-or btn-full" onclick="chercherMatchsAPI()">🔍 Chercher les matchs</button>
       <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="actualiserManuellement()">🔄 Actualiser les scores des matchs terminés</button>
@@ -430,23 +442,44 @@ function formatHeure(iso) {
 let dernierResultatAPI = [];
 
 const NOMS_COMP = { FL1: 'Ligue 1', PL: 'Premier League', PD: 'Liga', BL1: 'Bundesliga', SA: 'Serie A', CL: 'Champions League', WC: 'Coupe du Monde' };
+const COMPS_AVEC_STAGES = ['WC', 'CL']; // compétitions avec phases éliminatoires
+
+window.onChampChange = function() {
+  const comp = document.getElementById('champ-select').value;
+  const hasStages = COMPS_AVEC_STAGES.includes(comp);
+  document.getElementById('journee-row').style.display = hasStages ? 'none' : 'flex';
+  document.getElementById('stage-row').style.display = hasStages ? 'flex' : 'none';
+}
 
 window.chercherMatchsAPI = async function() {
   if (!currentUserData.isAdmin) return;
   const competition = document.getElementById('champ-select').value;
-  const journee = document.getElementById('journee-api-input').value.trim();
   const statusEl = document.getElementById('import-status');
   const previewEl = document.getElementById('import-preview');
-  if (!journee) { toast('Entre un numéro de journée', true); return; }
   statusEl.textContent = '⏳ Recherche des matchs...';
   previewEl.innerHTML = '';
+
+  const hasStages = COMPS_AVEC_STAGES.includes(competition);
+  let url;
+  let journeeLabel;
+  if (hasStages) {
+    const stage = document.getElementById('stage-select').value;
+    url = `/.netlify/functions/get-matches?competition=${competition}&stage=${stage}`;
+    journeeLabel = document.getElementById('stage-select').options[document.getElementById('stage-select').selectedIndex].text;
+  } else {
+    const journee = document.getElementById('journee-api-input').value.trim();
+    if (!journee) { toast('Entre un numéro de journée', true); statusEl.textContent = ''; return; }
+    url = `/.netlify/functions/get-matches?competition=${competition}&matchday=${journee}`;
+    journeeLabel = `J${journee}`;
+  }
+
   try {
-    const res = await fetch(`/.netlify/functions/get-matches?competition=${competition}&matchday=${journee}`);
+    const res = await fetch(url);
     const data = await res.json();
     if (data.error) { statusEl.textContent = '❌ ' + data.error; return; }
     if (!data.matchs || !data.matchs.length) { statusEl.textContent = '❌ Aucun match trouvé'; return; }
 
-    dernierResultatAPI = data.matchs.map(m => ({ ...m, competition }));
+    dernierResultatAPI = data.matchs.map(m => ({ ...m, competition, journeeLabel }));
     statusEl.textContent = `✅ ${data.matchs.length} match(s) trouvé(s) — coche ceux à importer :`;
 
     previewEl.innerHTML = dernierResultatAPI.map((m, i) => {
@@ -480,9 +513,11 @@ window.importerSelection = async function() {
     const m = dernierResultatAPI[i];
     const existant = matchs.find(x => x.apiId === m.id);
     if (existant) continue;
+    // Pour les phases éliminatoires, on utilise le nom du tour comme "journée"
+    const journeeValue = m.journeeLabel || String(m.journee);
     await push(ref(db, 'matchs'), {
       dom: m.dom, ext: m.ext, comp: NOMS_COMP[m.competition] || m.competition,
-      journee: String(m.journee), heure: m.heure, apiId: m.id, apiComp: m.competition,
+      journee: journeeValue, heure: m.heure, apiId: m.id, apiComp: m.competition,
       scoreDom: m.scoreDom ?? null, scoreExt: m.scoreExt ?? null
     });
     ajoutes++;
