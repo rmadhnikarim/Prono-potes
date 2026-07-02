@@ -763,7 +763,8 @@ function renderAttaque() {
 function renderMesPronos() {
   const el = document.getElementById('mespronos-liste');
   if (!matchs.length) { el.innerHTML = '<div class="empty-state"><span>📅</span>Aucun match disponible</div>'; return; }
-  el.innerHTML = matchs.map(m => {
+
+  function matchCard(m) {
     const locked = estVerrouille(m);
     const hasScore = m.scoreDom !== null && m.scoreDom !== undefined;
     const p = pronos[m.id]?.[currentUser.uid] || {};
@@ -771,7 +772,7 @@ function renderMesPronos() {
     if (hasScore && p.dom !== undefined && p.ext !== undefined) {
       if (p.dom === m.scoreDom && p.ext === m.scoreExt) badge = '<span class="lock-badge" style="background:var(--vert-clair)">+3 🎯 Exact !</span>';
       else if (getIssue(p.dom, p.ext) === getIssue(m.scoreDom, m.scoreExt)) badge = '<span class="lock-badge" style="background:#555">+1 ✅ Bonne issue</span>';
-      else badge = '<span class="lock-badge" style="background:#333">0 ❌</span>';
+      else if (hasScore) badge = '<span class="lock-badge" style="background:#333">0 ❌</span>';
     }
     return `
     <div class="card">
@@ -787,7 +788,44 @@ function renderMesPronos() {
         ${badge}
       </div>
     </div>`;
-  }).join('');
+  }
+
+  // Matchs ouverts (pas encore verrouillés) → affichés normalement en haut
+  const ouverts = matchs.filter(m => !estVerrouille(m));
+  // Matchs passés (verrouillés) → regroupés par journée en accordéon
+  const passes = matchs.filter(m => estVerrouille(m));
+  const journees = [...new Set(passes.filter(m => m.journee).map(m => m.journee))];
+
+  let html = '';
+
+  if (ouverts.length) {
+    html += `<div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:1px;color:var(--vert-clair);margin-bottom:8px">🔓 Matchs à venir</div>`;
+    html += ouverts.map(matchCard).join('');
+  }
+
+  if (journees.length) {
+    html += `<div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:1px;color:var(--texte-gris);margin:16px 0 8px">📦 Matchs passés</div>`;
+    html += journees.map(j => {
+      const matchsJ = passes.filter(m => m.journee === j);
+      const arcId = `prono-arc-${j.replace(/\s/g,'-')}`;
+      return `
+      <div class="archive-item" style="margin-bottom:8px">
+        <div class="archive-header" onclick="toggleArchive('${arcId}', this)">
+          <span class="archive-titre">📅 Journée ${j} <span style="font-size:0.75rem;color:var(--texte-gris);font-family:'Inter',sans-serif">(${matchsJ.length} match${matchsJ.length > 1 ? 's' : ''})</span></span>
+          <span class="archive-chevron">▼</span>
+        </div>
+        <div class="archive-body" id="${arcId}">
+          ${matchsJ.map(matchCard).join('')}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  if (!ouverts.length && !passes.length) {
+    html = '<div class="empty-state"><span>📅</span>Aucun match disponible</div>';
+  }
+
+  el.innerHTML = html;
 }
 
 // ---- CLASSEMENT ----
