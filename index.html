@@ -105,6 +105,25 @@
   .toast.error { background: var(--rouge); }
   .loading { text-align: center; padding: 20px; color: var(--texte-gris); font-size: 0.85rem; }
 
+  .archive-item { background: var(--gris); border-radius: 10px; margin-bottom: 10px; border: 1px solid #333; overflow: hidden; }
+  .archive-header { display: flex; justify-content: space-between; align-items: center; padding: 13px 16px; cursor: pointer; user-select: none; }
+  .archive-header:hover { background: #252525; }
+  .archive-titre { font-family: 'Bebas Neue', sans-serif; font-size: 1rem; letter-spacing: 1px; color: var(--blanc); }
+  .archive-chevron { color: var(--texte-gris); font-size: 0.8rem; transition: transform 0.2s; }
+  .archive-chevron.open { transform: rotate(180deg); }
+  .archive-body { display: none; padding: 0 12px 12px; }
+  .archive-body.open { display: block; }
+
+  .archive-card { background: var(--gris); border-radius: 12px; margin-bottom: 10px; border: 1px solid #333; overflow: hidden; }
+  .archive-header { display: flex; justify-content: space-between; align-items: center; padding: 13px 16px; cursor: pointer; }
+  .archive-header:hover { background: #252525; }
+  .archive-titre { font-family: 'Bebas Neue', sans-serif; font-size: 1rem; letter-spacing: 1px; color: var(--blanc); }
+  .archive-meta { font-size: 0.75rem; color: var(--texte-gris); }
+  .archive-chevron { color: var(--texte-gris); font-size: 0.8rem; transition: transform 0.2s; }
+  .archive-chevron.open { transform: rotate(180deg); }
+  .archive-body { display: none; padding: 0 12px 12px; }
+  .archive-body.open { display: block; }
+
   .preview-match { display: flex; align-items: center; gap: 10px; background: #252525; border-radius: 8px; padding: 10px 12px; margin-top: 6px; }
   .preview-match input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--vert-clair); }
   .preview-match-info { flex: 1; font-size: 0.83rem; }
@@ -240,13 +259,18 @@
   </div>
 
   <div id="classement" class="section">
+    <div class="legende" style="margin-bottom:12px">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:1px;color:var(--or)">🏆 Classement Général</div>
+    </div>
     <div id="podium-zone"></div>
     <div class="card">
       <table class="classement-table">
-        <thead><tr><th>#</th><th>Joueur</th><th>Pts</th><th>Exacts</th><th>Issues</th></tr></thead>
-        <tbody id="classement-body"><tr><td colspan="5"><div class="loading">Chargement...</div></td></tr></tbody>
+        <thead><tr><th>#</th><th>Joueur</th><th>Pts</th><th>Exacts</th><th>Issues</th><th>🗡️</th><th>💀</th></tr></thead>
+        <tbody id="classement-body"><tr><td colspan="7"><div class="loading">Chargement...</div></td></tr></tbody>
       </table>
     </div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:1px;color:var(--or);margin:16px 0 8px">📅 Archives par journée</div>
+    <div id="archives-liste"></div>
   </div>
 
   <div id="joueurs" class="section">
@@ -497,7 +521,12 @@ window.chercherMatchsAPI = async function() {
     }).join('');
 
     if (dernierResultatAPI.some(m => !matchs.some(x => x.apiId === m.id))) {
-      previewEl.innerHTML += `<button class="btn btn-vert btn-full" style="margin-top:10px" onclick="importerSelection()">📥 Importer la sélection</button>`;
+      previewEl.innerHTML += `
+        <div style="margin-top:10px">
+          <label style="display:block;font-size:0.75rem;color:var(--texte-gris);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">Numéro de ta journée (ex: S1, J15, 16èmes...)</label>
+          <input type="text" id="journee-perso-input" placeholder="Ex: S1" style="width:100%;margin-bottom:8px">
+        </div>
+        <button class="btn btn-vert btn-full" onclick="importerSelection()">📥 Importer la sélection</button>`;
     }
   } catch (e) {
     statusEl.textContent = '❌ Erreur de connexion à l\'API';
@@ -506,6 +535,8 @@ window.chercherMatchsAPI = async function() {
 
 window.importerSelection = async function() {
   const statusEl = document.getElementById('import-status');
+  const journeePerso = document.getElementById('journee-perso-input')?.value.trim();
+  if (!journeePerso) { toast('Entre un numéro de journée avant d\'importer', true); return; }
   let ajoutes = 0;
   for (let i = 0; i < dernierResultatAPI.length; i++) {
     const chk = document.getElementById(`chk-${i}`);
@@ -513,16 +544,14 @@ window.importerSelection = async function() {
     const m = dernierResultatAPI[i];
     const existant = matchs.find(x => x.apiId === m.id);
     if (existant) continue;
-    // Pour les phases éliminatoires, on utilise le nom du tour comme "journée"
-    const journeeValue = m.journeeLabel || String(m.journee);
     await push(ref(db, 'matchs'), {
       dom: m.dom, ext: m.ext, comp: NOMS_COMP[m.competition] || m.competition,
-      journee: journeeValue, heure: m.heure, apiId: m.id, apiComp: m.competition,
+      journee: journeePerso, heure: m.heure, apiId: m.id, apiComp: m.competition,
       scoreDom: m.scoreDom ?? null, scoreExt: m.scoreExt ?? null
     });
     ajoutes++;
   }
-  statusEl.textContent = `✅ ${ajoutes} match(s) importé(s) !`;
+  statusEl.textContent = `✅ ${ajoutes} match(s) importé(s) dans la journée "${journeePerso}" !`;
   document.getElementById('import-preview').innerHTML = '';
   toast(`✅ ${ajoutes} matchs ajoutés`);
 }
@@ -837,6 +866,97 @@ function renderClassement() {
       <td style="color:var(--or)">${s.voles > 0 ? '+' + s.voles : '-'}</td>
       <td style="color:var(--rouge)">${s.vole > 0 ? '-' + s.vole : '-'}</td>
     </tr>`).join('');
+  renderArchives();
+}
+
+// ---- ARCHIVES PAR JOURNÉE ----
+function calculerPointsJournee(journee) {
+  const scores = {};
+  Object.entries(joueursMap).forEach(([uid, j]) => scores[uid] = { pseudo: j.pseudo, pts: 0, exacts: 0, issues: 0, voles: 0, vole: 0 });
+  const matchsJournee = matchs.filter(m => m.journee === journee && m.scoreDom !== null && m.scoreDom !== undefined);
+
+  matchsJournee.forEach(m => {
+    const issueReel = getIssue(m.scoreDom, m.scoreExt);
+    Object.keys(joueursMap).forEach(uid => {
+      const p = pronos[m.id]?.[uid];
+      if (!p || p.dom === undefined || p.ext === undefined) return;
+      if (!scores[uid]) return;
+      if (p.dom === m.scoreDom && p.ext === m.scoreExt) { scores[uid].pts += 3; scores[uid].exacts++; }
+      else if (getIssue(p.dom, p.ext) === issueReel) { scores[uid].pts += 1; scores[uid].issues++; }
+    });
+  });
+
+  // Attaques de la journée
+  const choixJournee = attaques[journee] || {};
+  Object.entries(choixJournee).forEach(([attaquantUid, cibleUid]) => {
+    if (!scores[attaquantUid] || !scores[cibleUid]) return;
+    matchsJournee.forEach(m => {
+      const pAtt = pronos[m.id]?.[attaquantUid];
+      const pCible = pronos[m.id]?.[cibleUid];
+      if (!pAtt || pAtt.dom === undefined) return;
+      if (!pCible || pCible.dom === undefined) return;
+      const issueAtt = getIssue(pAtt.dom, pAtt.ext);
+      const issueCible = getIssue(pCible.dom, pCible.ext);
+      if (issueAtt === issueCible) return;
+      const issueReel = getIssue(m.scoreDom, m.scoreExt);
+      let vol = 0;
+      if (pAtt.dom === m.scoreDom && pAtt.ext === m.scoreExt) vol = 2;
+      else if (issueAtt === issueReel) vol = 1;
+      if (vol > 0) {
+        scores[attaquantUid].pts += vol; scores[attaquantUid].voles += vol;
+        scores[cibleUid].pts -= vol; scores[cibleUid].vole += vol;
+      }
+    });
+  });
+
+  return Object.values(scores).sort((a, b) => b.pts - a.pts || b.exacts - a.exacts);
+}
+
+function renderArchives() {
+  const el = document.getElementById('archives-liste');
+  const journees = [...new Set(matchs.filter(m => m.journee).map(m => m.journee))];
+  if (!journees.length) { el.innerHTML = '<div class="empty-state"><span>📅</span>Aucune journée disponible</div>'; return; }
+
+  el.innerHTML = journees.map(j => {
+    const sorted = calculerPointsJournee(j);
+    const matchsJ = matchs.filter(m => m.journee === j);
+    const termines = matchsJ.filter(m => m.scoreDom !== null && m.scoreDom !== undefined).length;
+    const rows = sorted.filter(s => s.pts !== 0 || s.exacts > 0).map((s, i) => `
+      <tr>
+        <td class="rang">${i+1}</td>
+        <td>${s.pseudo}</td>
+        <td class="pts-badge">${s.pts}</td>
+        <td style="color:var(--vert-clair)">${s.exacts}</td>
+        <td style="color:var(--texte-gris)">${s.issues}</td>
+        <td style="color:var(--or)">${s.voles > 0 ? '+'+s.voles : '-'}</td>
+        <td style="color:var(--rouge)">${s.vole > 0 ? '-'+s.vole : '-'}</td>
+      </tr>`).join('');
+
+    return `
+    <div class="archive-item">
+      <div class="archive-header" onclick="toggleArchive('arc-${j}', this)">
+        <div>
+          <span class="archive-titre">📅 Journée ${j}</span>
+          <span style="font-size:0.72rem;color:var(--texte-gris);margin-left:8px">${termines}/${matchsJ.length} matchs terminés</span>
+        </div>
+        <span class="archive-chevron">▼</span>
+      </div>
+      <div class="archive-body" id="arc-${j.replace(/\s/g,'-')}">
+        ${rows ? `<table class="classement-table" style="margin-top:4px">
+          <thead><tr><th>#</th><th>Joueur</th><th>Pts</th><th>✓</th><th>~</th><th>🗡️</th><th>💀</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>` : '<div style="color:var(--texte-gris);font-size:0.82rem;padding:8px">Aucun point marqué pour l\'instant</div>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+window.toggleArchive = function(id, header) {
+  const body = document.getElementById(id.replace(/\s/g,'-'));
+  const chevron = header.querySelector('.archive-chevron');
+  if (!body) return;
+  body.classList.toggle('open');
+  chevron.classList.toggle('open');
 }
 
 // ---- JOUEURS ----
