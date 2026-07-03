@@ -455,11 +455,11 @@ function estVerrouille(match) {
   return new Date() >= new Date(match.heure);
 }
 
-// H-12 : pronos verrouillés + révélés, attaque possible
+// H-4 : pronos verrouillés + révélés, attaque possible
 function estVerrouilleH12(match) {
   if (!match.heure) return false;
-  const h12 = new Date(new Date(match.heure).getTime() - 12 * 60 * 60 * 1000);
-  return new Date() >= h12;
+  const h4 = new Date(new Date(match.heure).getTime() - 4 * 60 * 60 * 1000);
+  return new Date() >= h4;
 }
 
 // H-0 : match commencé, plus d'attaque possible
