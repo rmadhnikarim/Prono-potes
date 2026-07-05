@@ -720,9 +720,18 @@ function renderMatchs() {
 // ---- MES PRONOS ----
 window.savMonProno = async function(matchId, side, val) {
   const match = matchs.find(m => m.id === matchId);
-  if (estVerrouilleH12(match)) return toast('🔒 Pronos fermés (H-12 atteint)', true);
-  await set(ref(db, `pronos/${matchId}/${currentUser.uid}/${side}`), parseInt(val) || 0);
-  toast('✅ Prono enregistré');
+  if (estVerrouilleH12(match)) return toast('🔒 Pronos fermés (H-4 atteint)', true);
+  const valInt = parseInt(val);
+  if (isNaN(valInt)) return;
+  await set(ref(db, `pronos/${matchId}/${currentUser.uid}/${side}`), valInt);
+  // Vérifie si l'autre champ est aussi rempli
+  const p = pronos[matchId]?.[currentUser.uid] || {};
+  const autreVal = side === 'dom' ? p.ext : p.dom;
+  if (autreVal !== undefined) {
+    toast('✅ Prono enregistré');
+  } else {
+    toast('⚠️ N\'oublie pas le score de l\'autre équipe !');
+  }
 }
 
 function getIssue(d, e) { return d > e ? 1 : d < e ? -1 : 0; }
