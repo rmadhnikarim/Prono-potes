@@ -848,7 +848,7 @@ function renderMesPronos() {
   if (!matchs.length) { el.innerHTML = '<div class="empty-state"><span>📅</span>Aucun match disponible</div>'; return; }
 
   function matchCard(m) {
-    const lockedH12 = estVerrouilleH12(m);
+    const lockedH4 = estVerrouilleH12(m);
     const lockedH0 = estVerrouille(m);
     const hasScore = m.scoreDom !== null && m.scoreDom !== undefined;
     const p = pronos[m.id]?.[currentUser.uid] || {};
@@ -860,23 +860,51 @@ function renderMesPronos() {
     }
     let statutBadge = '';
     if (lockedH0) statutBadge = '<span class="lock-badge">⚽ En cours / Terminé</span>';
-    else if (lockedH12) statutBadge = '<span class="lock-badge" style="background:#c87800">👁️ Visible · Verrouillé</span>';
+    else if (lockedH4) statutBadge = '<span class="lock-badge" style="background:#c87800">👁️ Visible · Verrouillé</span>';
     else statutBadge = '<span class="open-badge">🔓 Modifiable</span>';
+
+    // Pronos du groupe visibles après H-4
+    let groupePronos = '';
+    if (lockedH4) {
+      const lignes = Object.entries(joueursMap).map(([uid, j]) => {
+        const pj = pronos[m.id]?.[uid];
+        const isMe = uid === currentUser.uid;
+        let resultBadge = '';
+        if (hasScore && pj?.dom !== undefined && pj?.ext !== undefined) {
+          if (pj.dom === m.scoreDom && pj.ext === m.scoreExt) resultBadge = '<span style="color:var(--vert-clair);font-weight:700">🎯 +3</span>';
+          else if (getIssue(pj.dom, pj.ext) === getIssue(m.scoreDom, m.scoreExt)) resultBadge = '<span style="color:#aaa">✅ +1</span>';
+          else resultBadge = '<span style="color:#555">❌ 0</span>';
+        }
+        return `
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:${isMe ? 'rgba(37,163,85,0.1)' : '#1a1a1a'};border-radius:6px;margin-top:4px;font-size:0.82rem">
+          <span style="flex:1;color:${isMe ? 'var(--vert-clair)' : 'var(--blanc)'}">${isMe ? '👤 Toi' : j.pseudo}</span>
+          <span style="font-weight:700">${pj?.dom !== undefined ? pj.dom + ' - ' + pj.ext : '<span style="color:var(--texte-gris)">—</span>'}</span>
+          ${resultBadge}
+        </div>`;
+      }).join('');
+      groupePronos = `
+        <div style="margin-top:10px;border-top:1px solid #333;padding-top:10px">
+          <div style="font-size:0.72rem;color:var(--texte-gris);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">👁️ Pronos du groupe</div>
+          ${lignes}
+        </div>`;
+    }
 
     return `
     <div class="card">
       <h3>${m.dom} vs ${m.ext} <span style="font-size:0.72rem;color:var(--texte-gris)">${m.comp}</span></h3>
       <div class="match-heure">🕐 ${formatHeure(m.heure)} ${statutBadge}</div>
-      <div class="mes-pronos-row ${lockedH12 ? 'locked' : ''}">
+      <div class="mes-pronos-row ${lockedH4 ? 'locked' : ''}">
         <span>Ton prono :</span>
-        <input type="number" min="0" max="20" placeholder="0" value="${p.dom ?? ''}" ${lockedH12 ? 'disabled' : ''}
+        <input type="number" min="0" max="20" placeholder="0" value="${p.dom ?? ''}" ${lockedH4 ? 'disabled' : ''}
           onchange="savMonProno('${m.id}','dom',this.value)">
         <span class="vs-txt">-</span>
-        <input type="number" min="0" max="20" placeholder="0" value="${p.ext ?? ''}" ${lockedH12 ? 'disabled' : ''}
+        <input type="number" min="0" max="20" placeholder="0" value="${p.ext ?? ''}" ${lockedH4 ? 'disabled' : ''}
           onchange="savMonProno('${m.id}','ext',this.value)">
         ${badge}
       </div>
+      ${groupePronos}
     </div>`;
+  }
   }
 
   // Matchs ouverts (pas encore verrouillés) → affichés normalement en haut
