@@ -724,13 +724,14 @@ window.savMonProno = async function(matchId, side, val) {
   const valInt = parseInt(val);
   if (isNaN(valInt)) return;
   await set(ref(db, `pronos/${matchId}/${currentUser.uid}/${side}`), valInt);
-  // Vérifie si l'autre champ est aussi rempli
+  // Si l'autre côté n'est pas encore rempli, on le met à 0 automatiquement
   const p = pronos[matchId]?.[currentUser.uid] || {};
-  const autreVal = side === 'dom' ? p.ext : p.dom;
-  if (autreVal !== undefined) {
-    toast('✅ Prono enregistré');
+  const autreSide = side === 'dom' ? 'ext' : 'dom';
+  if (p[autreSide] === undefined) {
+    await set(ref(db, `pronos/${matchId}/${currentUser.uid}/${autreSide}`), 0);
+    toast('✅ Prono enregistré (autre score mis à 0 par défaut)');
   } else {
-    toast('⚠️ N\'oublie pas le score de l\'autre équipe !');
+    toast('✅ Prono enregistré');
   }
 }
 
