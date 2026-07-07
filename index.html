@@ -278,6 +278,13 @@
       <h3>Joueurs inscrits</h3>
       <div id="joueurs-liste"><div class="loading">Chargement...</div></div>
     </div>
+    <div class="card" id="joueur-pronos-card" style="display:none">
+      <h3>📋 Pronos d'un joueur</h3>
+      <select class="cible-select" id="joueur-select" onchange="afficherPronosJoueur()">
+        <option value="">-- Choisis un joueur --</option>
+      </select>
+      <div id="joueur-pronos-detail" style="margin-top:12px"></div>
+    </div>
   </div>
 </div>
 
@@ -455,14 +462,23 @@ function estVerrouille(match) {
   return new Date() >= new Date(match.heure);
 }
 
-// H-4 : pronos verrouillés + révélés, attaque possible
-function estVerrouilleH12(match) {
-  if (!match.heure) return false;
-  const h4 = new Date(new Date(match.heure).getTime() - 4 * 60 * 60 * 1000);
-  return new Date() >= h4;
+// Retourne l'heure H-4 du premier match d'une journée
+function getHeureVerrouilJournee(journee) {
+  const matchsJ = matchs.filter(m => m.journee === journee && m.heure);
+  if (!matchsJ.length) return null;
+  const premier = matchsJ.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsJ[0]);
+  return new Date(new Date(premier.heure).getTime() - 4 * 60 * 60 * 1000);
 }
 
-// H-0 : match commencé, plus d'attaque possible
+// H-4 du 1er match de la journée → tous les pronos de la journée verrouillés + visibles
+function estVerrouilleH4Journee(match) {
+  if (!match.journee) return estVerrouille(match); // fallback si pas de journée
+  const heureVerrou = getHeureVerrouilJournee(match.journee);
+  if (!heureVerrou) return false;
+  return new Date() >= heureVerrou;
+}
+
+// H-0 : match commencé
 function estDebutMatch(match) {
   return estVerrouille(match);
 }
@@ -720,7 +736,7 @@ function renderMatchs() {
 // ---- MES PRONOS ----
 window.savMonProno = async function(matchId, side, val) {
   const match = matchs.find(m => m.id === matchId);
-  if (estVerrouilleH12(match)) return toast('🔒 Pronos fermés (H-4 atteint)', true);
+  if (estVerrouilleH4Journee(match)) return toast('🔒 Pronos fermés (H-4 atteint)', true);
   const valInt = parseInt(val);
   if (isNaN(valInt)) return;
   await set(ref(db, `pronos/${matchId}/${currentUser.uid}/${side}`), valInt);
@@ -750,7 +766,7 @@ window.choisirAttaque = async function(journee, matchId, cibleUid) {
   if (cibleUid === currentUser.uid) return toast('Tu ne peux pas t\'attaquer toi-même', true);
   const match = matchs.find(m => m.id === matchId);
   if (!match) return;
-  if (!estVerrouilleH12(match)) return toast('Les pronos ne sont pas encore révélés (avant H-12)', true);
+  if (!estVerrouilleH4Journee(match)) return toast('Les pronos ne sont pas encore révélés (avant H-12)', true);
   if (estVerrouille(match)) return toast('🔒 Trop tard, le match a commencé', true);
   // Vérifier max 2 attaquants sur cette cible pour ce match
   const choixJournee = attaques[journee] || {};
@@ -781,9 +797,9 @@ function renderAttaque() {
     const matchsJournee = matchs.filter(m => m.journee === journee);
 
     // Matchs de cette journée avec fenêtre H-12 ouverte
-    const matchsAttaquables = matchsJournee.filter(m => estVerrouilleH12(m) && !estVerrouille(m));
+    const matchsAttaquables = matchsJournee.filter(m => estVerrouilleH4Journee(m) && !estVerrouille(m));
     const matchsPasses = matchsJournee.filter(m => estVerrouille(m));
-    const matchsEnAttente = matchsJournee.filter(m => !estVerrouilleH12(m));
+    const matchsEnAttente = matchsJournee.filter(m => !estVerrouilleH4Journee(m));
 
     const compteurCibles = {}; // matchId -> { cibleUid -> nb }
     Object.entries(choixJournee).forEach(([uid, a]) => {
@@ -848,7 +864,7 @@ function renderMesPronos() {
   if (!matchs.length) { el.innerHTML = '<div class="empty-state"><span>📅</span>Aucun match disponible</div>'; return; }
 
   function matchCard(m) {
-    const lockedH4 = estVerrouilleH12(m);
+    const lockedH4 = estVerrouilleH4Journee(m);
     const lockedH0 = estVerrouille(m);
     const hasScore = m.scoreDom !== null && m.scoreDom !== undefined;
     const p = pronos[m.id]?.[currentUser.uid] || {};
@@ -904,7 +920,6 @@ function renderMesPronos() {
       </div>
       ${groupePronos}
     </div>`;
-  }
   }
 
   // Matchs ouverts (pas encore verrouillés) → affichés normalement en haut
@@ -1140,6 +1155,69 @@ function renderJoueurs() {
         : ''}
     </div>`
   ).join('');
+
+  // Remplie le select de joueurs
+  const select = document.getElementById('joueur-select');
+  if (select) {
+    select.innerHTML = '<option value="">-- Choisis un joueur --</option>' +
+      entries.map(([uid, j]) => `<option value="${uid}">${j.pseudo}</option>`).join('');
+  }
+  document.getElementById('joueur-pronos-card').style.display = entries.length ? 'block' : 'none';
+}
+
+window.afficherPronosJoueur = function() {
+  const uid = document.getElementById('joueur-select').value;
+  const detail = document.getElementById('joueur-pronos-detail');
+  if (!uid) { detail.innerHTML = ''; return; }
+
+  const pseudo = joueursMap[uid]?.pseudo || '?';
+
+  // Journées disponibles
+  const journees = [...new Set(matchs.filter(m => m.journee).map(m => m.journee))];
+  if (!journees.length) { detail.innerHTML = '<div style="color:var(--texte-gris);font-size:0.85rem">Aucune journée disponible</div>'; return; }
+
+  detail.innerHTML = journees.map(journee => {
+    const matchsJ = matchs.filter(m => m.journee === journee);
+    const verrou = matchsJ.some(m => estVerrouilleH4Journee(m));
+
+    if (!verrou) {
+      return `
+      <div class="archive-item" style="margin-bottom:8px">
+        <div style="padding:12px 16px;color:var(--texte-gris);font-size:0.83rem">
+          📅 <strong style="color:var(--blanc)">Journée ${journee}</strong> — 🔒 Pronos masqués (avant H-4)
+        </div>
+      </div>`;
+    }
+
+    const lignes = matchsJ.map(m => {
+      const p = pronos[m.id]?.[uid];
+      const hasScore = m.scoreDom !== null && m.scoreDom !== undefined;
+      let badge = '';
+      if (hasScore && p?.dom !== undefined && p?.ext !== undefined) {
+        if (p.dom === m.scoreDom && p.ext === m.scoreExt) badge = '<span style="color:var(--vert-clair);font-weight:700">🎯 +3</span>';
+        else if (getIssue(p.dom, p.ext) === getIssue(m.scoreDom, m.scoreExt)) badge = '<span style="color:#aaa">✅ +1</span>';
+        else badge = '<span style="color:#555">❌ 0</span>';
+      }
+      return `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#1a1a1a;border-radius:7px;margin-top:5px;font-size:0.82rem">
+        <span style="flex:1">${m.dom} vs ${m.ext}</span>
+        <span style="font-weight:700;color:var(--or)">${p?.dom !== undefined ? p.dom + ' - ' + p.ext : '<span style="color:var(--texte-gris)">—</span>'}</span>
+        ${badge}
+      </div>`;
+    }).join('');
+
+    const arcId = `jp-${journee.replace(/\s/g,'-')}`;
+    return `
+    <div class="archive-item" style="margin-bottom:8px">
+      <div class="archive-header" onclick="toggleArchive('${arcId}', this)">
+        <span class="archive-titre">📅 Journée ${journee}</span>
+        <span class="archive-chevron">▼</span>
+      </div>
+      <div class="archive-body" id="${arcId}" style="padding:8px 12px 12px">
+        ${lignes}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 window.supprimerJoueur = async function(uid, pseudo) {
