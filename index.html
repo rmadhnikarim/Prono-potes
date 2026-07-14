@@ -82,6 +82,10 @@
   .mes-pronos-row input { width: 56px; text-align: center; padding: 9px; font-size: 1rem; }
   .mes-pronos-row.locked input { opacity: 0.5; pointer-events: none; }
   .vs-txt { color: var(--texte-gris); font-weight: 700; }
+  .coeur-btn { background: none; border: none; font-size: 1.4rem; cursor: pointer; padding: 0; line-height: 1; transition: transform 0.2s; }
+  .coeur-btn:hover { transform: scale(1.2); }
+  .double-badge { background: linear-gradient(135deg, #f0b429, #e03434); color: #fff; font-size: 0.7rem; padding: 2px 7px; border-radius: 6px; font-weight: 700; }
+  .match-double-banner { background: linear-gradient(135deg, #f0b429 0%, #c87800 100%); color: #000; font-size: 0.78rem; font-weight: 700; padding: 5px 10px; border-radius: 6px; margin-bottom: 6px; text-align: center; }
 
   .podium { display: flex; justify-content: center; gap: 10px; margin-bottom: 18px; align-items: flex-end; }
   .podium-item { text-align: center; padding: 10px; border-radius: 10px; min-width: 85px; }
@@ -190,6 +194,7 @@
     <button class="tab" onclick="showTab('attaque', this)">🗡️ Attaque</button>
     <button class="tab" onclick="showTab('classement', this)">🏆 Classement</button>
     <button class="tab" onclick="showTab('joueurs', this)">👥 Joueurs</button>
+    <button class="tab" onclick="showTab('chat', this)">💬 Chat</button>
   </div>
 
   <div id="matchs" class="section active">
@@ -247,6 +252,23 @@
       </div>
       <button class="btn btn-vert btn-full" onclick="ajouterMatch()">+ Ajouter le match</button>
     </div>
+    <div class="card" id="admin-add-question" style="display:none">
+      <h3>❓ Ajouter une question bonus</h3>
+      <div class="field" style="margin-bottom:10px">
+        <label style="display:block;font-size:0.72rem;color:var(--texte-gris);text-transform:uppercase;margin-bottom:4px">Question</label>
+        <input type="text" id="question-input" placeholder="Ex: Qui sera meilleur buteur ?" style="width:100%">
+      </div>
+      <div class="field" style="margin-bottom:10px">
+        <label style="display:block;font-size:0.72rem;color:var(--texte-gris);text-transform:uppercase;margin-bottom:4px">Journée</label>
+        <input type="text" id="question-journee-input" placeholder="Ex: S1" style="width:100%">
+      </div>
+      <div id="question-options-liste">
+        <div class="input-row"><input type="text" class="q-option" placeholder="Choix 1" style="flex:1"></div>
+        <div class="input-row"><input type="text" class="q-option" placeholder="Choix 2" style="flex:1"></div>
+      </div>
+      <button class="btn btn-ghost btn-full" style="margin-bottom:8px" onclick="ajouterChoix()">+ Ajouter un choix</button>
+      <button class="btn btn-vert btn-full" onclick="ajouterQuestion()">✓ Créer la question</button>
+    </div>
     <div id="matchs-liste"><div class="loading">Chargement...</div></div>
   </div>
 
@@ -286,6 +308,18 @@
       <div id="joueur-pronos-detail" style="margin-top:12px"></div>
     </div>
   </div>
+
+  <div id="chat" class="section">
+    <div style="display:flex;flex-direction:column;height:70vh">
+      <div id="chat-messages" style="flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px">
+        <div class="loading">Chargement...</div>
+      </div>
+      <div style="display:flex;gap:8px;padding:12px 0 0">
+        <input type="text" id="chat-input" placeholder="Ton message..." style="flex:1" onkeydown="if(event.key==='Enter') envoyerMessage()">
+        <button class="btn btn-vert" onclick="envoyerMessage()">Envoyer</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -321,8 +355,11 @@ let currentUser = null;
 let currentUserData = null; // { pseudo, isAdmin }
 let matchs = [];
 let pronos = {};
-let attaques = {}; // { journee: { uidAttaquant: uidCible } }
-let joueursMap = {}; // uid -> pseudo
+let attaques = {};
+let joueursMap = {};
+let questions = {};
+let coeurs = {}; // { journee: { uid: matchId } }
+let chatMessages = [];
 let activeTab = 'matchs';
 let authMode = 'login';
 
@@ -402,6 +439,7 @@ onAuthStateChanged(auth, async (user) => {
     document.getElementById('user-name').textContent = currentUserData.pseudo + (currentUserData.isAdmin ? ' (Admin)' : '');
     document.getElementById('admin-add-match').style.display = currentUserData.isAdmin ? 'block' : 'none';
     document.getElementById('admin-import-api').style.display = currentUserData.isAdmin ? 'block' : 'none';
+    document.getElementById('admin-add-question').style.display = currentUserData.isAdmin ? 'block' : 'none';
     ecouterDonnees();
     if (currentUserData.isAdmin) {
       setInterval(actualiserScoresAPI, 5 * 60 * 1000); // toutes les 5 min
@@ -431,6 +469,22 @@ function ecouterDonnees() {
     attaques = snap.val() || {};
     renderCurrent();
   });
+  onValue(ref(db, 'questions'), (snap) => {
+    questions = snap.val() || {};
+    renderCurrent();
+  });
+  onValue(ref(db, 'coeurs'), (snap) => {
+    coeurs = snap.val() || {};
+    renderCurrent();
+  });
+  onValue(ref(db, 'reponsesQuestions'), (snap) => {
+    window._reponsesQuestions = snap.val() || {};
+    renderCurrent();
+  });
+  onValue(ref(db, 'chat'), (snap) => {
+    chatMessages = snap.val() ? Object.values(snap.val()) : [];
+    if (activeTab === 'chat') renderChat();
+  });
 }
 
 window.showTab = function(tab, el) {
@@ -448,6 +502,7 @@ function renderCurrent() {
   else if (activeTab === 'attaque') renderAttaque();
   else if (activeTab === 'classement') renderClassement();
   else if (activeTab === 'joueurs') renderJoueurs();
+  else if (activeTab === 'chat') renderChat();
 }
 
 function toast(msg, isError) {
@@ -462,17 +517,17 @@ function estVerrouille(match) {
   return new Date() >= new Date(match.heure);
 }
 
-// Retourne l'heure H-4 du premier match d'une journée
+// Retourne l'heure H-6 du premier match d'une journée
 function getHeureVerrouilJournee(journee) {
   const matchsJ = matchs.filter(m => m.journee === journee && m.heure);
   if (!matchsJ.length) return null;
   const premier = matchsJ.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsJ[0]);
-  return new Date(new Date(premier.heure).getTime() - 4 * 60 * 60 * 1000);
+  return new Date(new Date(premier.heure).getTime() - 6 * 60 * 60 * 1000);
 }
 
-// H-4 du 1er match de la journée → tous les pronos de la journée verrouillés + visibles
-function estVerrouilleH4Journee(match) {
-  if (!match.journee) return estVerrouille(match); // fallback si pas de journée
+// H-6 du 1er match de la journée → pronos verrouillés + visibles
+function estVerrouilleH6Journee(match) {
+  if (!match.journee) return estVerrouille(match);
   const heureVerrou = getHeureVerrouilJournee(match.journee);
   if (!heureVerrou) return false;
   return new Date() >= heureVerrou;
@@ -481,6 +536,17 @@ function estVerrouilleH4Journee(match) {
 // H-0 : match commencé
 function estDebutMatch(match) {
   return estVerrouille(match);
+}
+
+// Tirage au sort déterministe du match double (basé sur la journée, stable)
+function getMatchDouble(journee) {
+  const matchsJ = matchs.filter(m => m.journee === journee);
+  if (!matchsJ.length) return null;
+  // Hash déterministe basé sur le nom de la journée pour que tout le monde voie le même
+  let hash = 0;
+  for (const c of journee) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff;
+  const idx = Math.abs(hash) % matchsJ.length;
+  return matchsJ[idx].id;
 }
 
 function formatHeure(iso) {
@@ -736,7 +802,7 @@ function renderMatchs() {
 // ---- MES PRONOS ----
 window.savMonProno = async function(matchId, side, val) {
   const match = matchs.find(m => m.id === matchId);
-  if (estVerrouilleH4Journee(match)) return toast('🔒 Pronos fermés (H-4 atteint)', true);
+  if (estVerrouilleH6Journee(match)) return toast('🔒 Pronos fermés (H-4 atteint)', true);
   const valInt = parseInt(val);
   if (isNaN(valInt)) return;
   await set(ref(db, `pronos/${matchId}/${currentUser.uid}/${side}`), valInt);
@@ -766,7 +832,7 @@ window.choisirAttaque = async function(journee, matchId, cibleUid) {
   if (cibleUid === currentUser.uid) return toast('Tu ne peux pas t\'attaquer toi-même', true);
   const match = matchs.find(m => m.id === matchId);
   if (!match) return;
-  if (!estVerrouilleH4Journee(match)) return toast('Les pronos ne sont pas encore révélés (avant H-12)', true);
+  if (!estVerrouilleH6Journee(match)) return toast('Les pronos ne sont pas encore révélés (avant H-12)', true);
   if (estVerrouille(match)) return toast('🔒 Trop tard, le match a commencé', true);
   // Vérifier max 2 attaquants sur cette cible pour ce match
   const choixJournee = attaques[journee] || {};
@@ -795,65 +861,85 @@ function renderAttaque() {
     const choixJournee = attaques[journee] || {};
     const monAttaque = choixJournee[currentUser.uid];
     const matchsJournee = matchs.filter(m => m.journee === journee);
-
-    // Matchs de cette journée avec fenêtre H-12 ouverte
-    const matchsAttaquables = matchsJournee.filter(m => estVerrouilleH4Journee(m) && !estVerrouille(m));
+    const matchsOuverts = matchsJournee.filter(m => estVerrouilleH6Journee(m) && !estVerrouille(m));
     const matchsPasses = matchsJournee.filter(m => estVerrouille(m));
-    const matchsEnAttente = matchsJournee.filter(m => !estVerrouilleH4Journee(m));
+    const matchsEnAttente = matchsJournee.filter(m => !estVerrouilleH6Journee(m));
+    const fenetreOuverte = matchsOuverts.length > 0;
 
-    const compteurCibles = {}; // matchId -> { cibleUid -> nb }
+    // Compte attaques reçues par cible sur chaque match
+    const compteurCibles = {};
     Object.entries(choixJournee).forEach(([uid, a]) => {
-      if (!a?.matchId) return;
-      if (!compteurCibles[a.matchId]) compteurCibles[a.matchId] = {};
-      compteurCibles[a.matchId][a.cibleUid] = (compteurCibles[a.matchId][a.cibleUid] || 0) + 1;
+      if (!a?.matchId || uid === currentUser.uid) return;
+      const key = `${a.matchId}_${a.cibleUid}`;
+      compteurCibles[key] = (compteurCibles[key] || 0) + 1;
     });
 
     let contenu = '';
 
-    // Si attaque déjà choisie
     if (monAttaque?.matchId) {
+      // Attaque déjà choisie
       const mAttaque = matchs.find(m => m.id === monAttaque.matchId);
       const ciblePseudo = joueursMap[monAttaque.cibleUid]?.pseudo || '?';
       const matchCommence = mAttaque ? estVerrouille(mAttaque) : false;
       contenu = `
-        <div class="cible-choisie-box">
-          🗡️ Tu attaques <strong>${ciblePseudo}</strong> sur <strong>${mAttaque ? mAttaque.dom + ' vs ' + mAttaque.ext : '?'}</strong>
-        </div>
-        ${!matchCommence ? `<button class="btn btn-rouge" style="margin-top:8px" onclick="annulerAttaque('${journee}')">Annuler mon attaque</button>` : ''}`;
-    } else if (matchsAttaquables.length) {
-      // Fenêtre ouverte → on peut choisir
-      const matchOptions = matchsAttaquables.map(m =>
-        `<option value="${m.id}">${m.dom} vs ${m.ext}</option>`
-      ).join('');
+        <div class="cible-choisie-box">🗡️ Tu attaques <strong>${ciblePseudo}</strong> sur <strong>${mAttaque ? mAttaque.dom + ' vs ' + mAttaque.ext : '?'}</strong></div>
+        ${!matchCommence ? `<button class="btn btn-rouge" style="margin-top:8px" onclick="annulerAttaque('${journee}')">Annuler</button>` : ''}`;
 
+    } else if (fenetreOuverte) {
+      // Fenêtre H-6 ouverte → affiche les joueurs avec leurs pronos
       const autresJoueurs = Object.entries(joueursMap).filter(([uid]) => uid !== currentUser.uid);
+      const joueurCards = autresJoueurs.map(([uid, j]) => {
+        const pronosJoueur = matchsOuverts.map(m => {
+          const p = pronos[m.id]?.[uid];
+          const monP = pronos[m.id]?.[currentUser.uid];
+          const hasProno = p?.dom !== undefined && p?.ext !== undefined;
+          const hasMonProno = monP?.dom !== undefined && monP?.ext !== undefined;
+          const issuesDiff = hasProno && hasMonProno && getIssue(p.dom, p.ext) !== getIssue(monP.dom, monP.ext);
+          const nbAttaques = compteurCibles[`${m.id}_${uid}`] || 0;
+          const dispo = issuesDiff && nbAttaques < 2;
+          const isDouble = getMatchDouble(journee) === m.id;
+          return `
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:${dispo ? '#1a2a1a' : '#1a1a1a'};border-radius:6px;margin-top:4px;border:1px solid ${dispo ? 'var(--vert-clair)' : '#333'}">
+            <div style="flex:1;font-size:0.78rem">
+              <div>${m.dom} vs ${m.ext} ${isDouble ? '<span class="double-badge">x2</span>' : ''}</div>
+              <div style="color:${hasProno ? 'var(--or)' : 'var(--texte-gris)'}">Prono : ${hasProno ? p.dom + ' - ' + p.ext : '—'}</div>
+            </div>
+            ${dispo ? `<button class="btn btn-rouge" style="font-size:0.72rem;padding:5px 10px" onclick="choisirAttaque('${journee}','${m.id}','${uid}')">🗡️ Attaquer</button>` :
+              !hasProno ? '<span style="font-size:0.72rem;color:var(--texte-gris)">Pas de prono</span>' :
+              !issuesDiff ? '<span style="font-size:0.72rem;color:var(--texte-gris)">Même issue</span>' :
+              '<span style="font-size:0.72rem;color:var(--texte-gris)">Max 2 attaques</span>'}
+          </div>`;
+        }).join('');
+
+        const arcId = `att-${journee}-${uid}`.replace(/\s/g,'-');
+        return `
+        <div class="archive-item" style="margin-bottom:6px">
+          <div class="archive-header" onclick="toggleArchive('${arcId}',this)">
+            <span class="archive-titre" style="font-size:0.9rem">👤 ${j.pseudo}</span>
+            <span class="archive-chevron">▼</span>
+          </div>
+          <div class="archive-body" id="${arcId}" style="padding:6px 10px 10px">
+            ${pronosJoueur || '<div style="color:var(--texte-gris);font-size:0.8rem;padding:6px">Aucun match attaquable</div>'}
+          </div>
+        </div>`;
+      }).join('');
 
       contenu = `
-        <div style="font-size:0.78rem;color:var(--texte-gris);margin-bottom:10px">👁️ Les pronos sont révélés — choisis ton match et ta cible !</div>
-        <select class="cible-select" id="match-select-${journee}">
-          <option value="">-- Choisis le match --</option>
-          ${matchOptions}
-        </select>
-        <select class="cible-select" id="cible-select-${journee}" style="margin-top:6px">
-          <option value="">-- Choisis ta cible --</option>
-          ${autresJoueurs.map(([uid, j]) => {
-            const matchSel = ''; // sera filtré côté client
-            return `<option value="${uid}">${j.pseudo}</option>`;
-          }).join('')}
-        </select>
-        <button class="btn btn-vert btn-full" style="margin-top:8px" onclick="choisirAttaque('${journee}', document.getElementById('match-select-${journee}').value, document.getElementById('cible-select-${journee}').value)">🗡️ Attaquer !</button>`;
+        <div style="font-size:0.78rem;color:var(--or);margin-bottom:10px">👁️ Pronos révélés — clique sur un joueur pour voir ses pronos et attaquer !</div>
+        ${joueurCards}`;
+
     } else if (matchsEnAttente.length) {
-      const prochainH12 = matchsEnAttente.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsEnAttente[0]);
-      const h12 = new Date(new Date(prochainH12.heure).getTime() - 12 * 60 * 60 * 1000);
-      contenu = `<div style="color:var(--texte-gris);font-size:0.83rem">⏳ Pronos révélés le ${h12.toLocaleString('fr-FR', {weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} (H-12)</div>`;
+      const premier = matchsEnAttente.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsEnAttente[0]);
+      const h6 = new Date(new Date(premier.heure).getTime() - 6 * 60 * 60 * 1000);
+      contenu = `<div style="color:var(--texte-gris);font-size:0.83rem">⏳ Pronos révélés et attaques possibles le ${h6.toLocaleString('fr-FR', {weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} (H-6)</div>`;
     } else {
-      contenu = `<div style="color:var(--texte-gris);font-size:0.83rem">${monAttaque ? '' : 'Aucune attaque possible pour cette journée'}</div>`;
+      contenu = `<div style="color:var(--texte-gris);font-size:0.83rem">🔒 Journée terminée</div>`;
     }
 
     return `
     <div class="attaque-card ${monAttaque ? 'choisie' : ''} ${matchsPasses.length === matchsJournee.length ? 'fermee' : ''}">
-      <div class="attaque-journee-titre">Journée ${journee}</div>
-      <div class="attaque-sous">${matchsAttaquables.length ? '🔓 Fenêtre d\'attaque ouverte' : matchsPasses.length === matchsJournee.length ? '🔒 Journée terminée' : '⏳ En attente de H-12'}</div>
+      <div class="attaque-journee-titre">Journée ${journee} ${getMatchDouble(journee) && fenetreOuverte ? '<span class="double-badge" style="font-size:0.7rem">🎲 Match double révélé</span>' : ''}</div>
+      <div class="attaque-sous">${fenetreOuverte ? '🔓 Fenêtre d\'attaque ouverte' : matchsPasses.length === matchsJournee.length ? '🔒 Journée terminée' : '⏳ En attente de H-6'}</div>
       ${contenu}
     </div>`;
   }).join('');
@@ -864,7 +950,7 @@ function renderMesPronos() {
   if (!matchs.length) { el.innerHTML = '<div class="empty-state"><span>📅</span>Aucun match disponible</div>'; return; }
 
   function matchCard(m) {
-    const lockedH4 = estVerrouilleH4Journee(m);
+    const lockedH4 = estVerrouilleH6Journee(m);
     const lockedH0 = estVerrouille(m);
     const hasScore = m.scoreDom !== null && m.scoreDom !== undefined;
     const p = pronos[m.id]?.[currentUser.uid] || {};
@@ -907,6 +993,7 @@ function renderMesPronos() {
 
     return `
     <div class="card">
+      ${m.journee && getMatchDouble(m.journee) === m.id ? '<div class="match-double-banner">🎲 MATCH DOUBLE — Points x2 !</div>' : ''}
       <h3>${m.dom} vs ${m.ext} <span style="font-size:0.72rem;color:var(--texte-gris)">${m.comp}</span></h3>
       <div class="match-heure">🕐 ${formatHeure(m.heure)} ${statutBadge}</div>
       <div class="mes-pronos-row ${lockedH4 ? 'locked' : ''}">
@@ -916,6 +1003,7 @@ function renderMesPronos() {
         <span class="vs-txt">-</span>
         <input type="number" min="0" max="20" placeholder="0" value="${p.ext ?? ''}" ${lockedH4 ? 'disabled' : ''}
           onchange="savMonProno('${m.id}','ext',this.value)">
+        ${!lockedH4 && m.journee ? `<button class="coeur-btn ${monCoeurJournee(m.journee) === m.id ? 'actif' : ''}" onclick="toggleCoeur('${m.journee}','${m.id}')" title="Doubler les points de ce match">${monCoeurJournee(m.journee) === m.id ? '❤️' : '🤍'}</button>` : monCoeurJournee(m.journee) === m.id ? '<span>❤️ x2</span>' : ''}
         ${badge}
       </div>
       ${groupePronos}
@@ -961,47 +1049,80 @@ function renderMesPronos() {
 }
 
 // ---- CLASSEMENT ----
+function getPtsMatch(uid, m) {
+  const p = pronos[m.id]?.[uid];
+  if (!p || p.dom === undefined || p.ext === undefined) return 0;
+  if (m.scoreDom === null || m.scoreDom === undefined) return 0;
+  const issueReel = getIssue(m.scoreDom, m.scoreExt);
+  if (p.dom === m.scoreDom && p.ext === m.scoreExt) return 3;
+  if (getIssue(p.dom, p.ext) === issueReel) return 1;
+  return 0;
+}
+
+function getMultiplier(uid, m) {
+  if (!m.journee) return 1;
+  let mult = 1;
+  if (getMatchDouble(m.journee) === m.id) mult *= 2; // match tiré au sort x2
+  if (coeurs[m.journee]?.[uid] === m.id) mult *= 2; // cœur x2
+  return mult;
+}
+
 function calculerPoints() {
   const scores = {};
   Object.entries(joueursMap).forEach(([uid, j]) => scores[uid] = { pseudo: j.pseudo, pts: 0, exacts: 0, issues: 0, voles: 0, vole: 0 });
+
+  // Points des matchs (avec multiplicateurs)
   matchs.forEach(m => {
     if (m.scoreDom === null || m.scoreDom === undefined) return;
-    const issueReel = getIssue(m.scoreDom, m.scoreExt);
     Object.keys(joueursMap).forEach(uid => {
-      const p = pronos[m.id]?.[uid];
-      if (!p || p.dom === undefined || p.ext === undefined) return;
       if (!scores[uid]) return;
-      if (p.dom === m.scoreDom && p.ext === m.scoreExt) { scores[uid].pts += 3; scores[uid].exacts++; }
-      else if (getIssue(p.dom, p.ext) === issueReel) { scores[uid].pts += 1; scores[uid].issues++; }
+      const pts = getPtsMatch(uid, m);
+      if (pts === 3) scores[uid].exacts++;
+      else if (pts === 1) scores[uid].issues++;
+      const mult = getMultiplier(uid, m);
+      scores[uid].pts += pts * mult;
     });
   });
 
-  // ---- Application des attaques (vol de points) ----
+  // Points des questions bonus
+  Object.entries(questions).forEach(([qId, q]) => {
+    if (q.reponseCorrecte === null || q.reponseCorrecte === undefined) return;
+    const reponsesQ = window._reponsesQuestions?.[qId] || {};
+    Object.entries(reponsesQ).forEach(([uid, rep]) => {
+      if (scores[uid] && rep === q.reponseCorrecte) scores[uid].pts += 5;
+    });
+  });
+
+  // Attaques
   Object.entries(attaques).forEach(([journee, choix]) => {
     Object.entries(choix).forEach(([attaquantUid, attaque]) => {
-      // Support ancien format (string) et nouveau format ({ matchId, cibleUid })
       const cibleUid = attaque?.cibleUid || (typeof attaque === 'string' ? attaque : null);
       const matchId = attaque?.matchId || null;
       if (!cibleUid || !scores[attaquantUid] || !scores[cibleUid]) return;
-
-      // Si nouveau format : on applique sur le match précis seulement
       const matchsCibles = matchId
         ? matchs.filter(m => m.id === matchId && m.scoreDom !== null && m.scoreDom !== undefined)
         : matchs.filter(m => m.journee === journee && m.scoreDom !== null && m.scoreDom !== undefined);
-
       matchsCibles.forEach(m => {
         const pAtt = pronos[m.id]?.[attaquantUid];
         const pCible = pronos[m.id]?.[cibleUid];
-        if (!pAtt || pAtt.dom === undefined || pAtt.ext === undefined) return;
-        if (!pCible || pCible.dom === undefined || pCible.ext === undefined) return;
+        if (!pAtt || pAtt.dom === undefined) return;
+        if (!pCible || pCible.dom === undefined) return;
         const issueAtt = getIssue(pAtt.dom, pAtt.ext);
         const issueCible = getIssue(pCible.dom, pCible.ext);
-        if (issueAtt === issueCible) return;
+        if (issueAtt === issueCible) return; // issues identiques → pas d'attaque
         const issueReel = getIssue(m.scoreDom, m.scoreExt);
-        let vol = 0;
-        if (pAtt.dom === m.scoreDom && pAtt.ext === m.scoreExt) vol = 2;
-        else if (issueAtt === issueReel) vol = 1;
-        if (vol > 0) {
+        const isDouble = getMatchDouble(m.journee) === m.id;
+        let vol = 2; // toujours 2 pts volés (favorable attaquant ou cible)
+        if (isDouble) vol *= 2;
+        // Favorable à la cible → elle vole l'attaquant
+        if (issueCible === issueReel && issueAtt !== issueReel) {
+          scores[cibleUid].pts += vol;
+          scores[cibleUid].voles += vol;
+          scores[attaquantUid].pts -= vol;
+          scores[attaquantUid].vole += vol;
+        }
+        // Favorable à l'attaquant → il vole la cible
+        else if (issueAtt === issueReel && issueCible !== issueReel) {
           scores[attaquantUid].pts += vol;
           scores[attaquantUid].voles += vol;
           scores[cibleUid].pts -= vol;
@@ -1142,6 +1263,124 @@ window.toggleArchive = function(id, header) {
   chevron.classList.toggle('open');
 }
 
+// ---- QUESTIONS BONUS ----
+window.ajouterChoix = function() {
+  const liste = document.getElementById('question-options-liste');
+  const n = liste.querySelectorAll('.q-option').length + 1;
+  const div = document.createElement('div');
+  div.className = 'input-row';
+  div.innerHTML = `<input type="text" class="q-option" placeholder="Choix ${n}" style="flex:1">`;
+  liste.appendChild(div);
+}
+
+window.ajouterQuestion = async function() {
+  if (!currentUserData.isAdmin) return;
+  const question = document.getElementById('question-input').value.trim();
+  const journee = document.getElementById('question-journee-input').value.trim();
+  const options = [...document.querySelectorAll('.q-option')].map(i => i.value.trim()).filter(Boolean);
+  if (!question) return toast('Entre une question', true);
+  if (!journee) return toast('Entre un numéro de journée', true);
+  if (options.length < 2) return toast('Au moins 2 choix requis', true);
+  await push(ref(db, 'questions'), { question, journee, options, reponseCorrecte: null });
+  document.getElementById('question-input').value = '';
+  document.getElementById('question-journee-input').value = '';
+  document.querySelectorAll('.q-option').forEach((el, i) => { el.value = ''; if (i >= 2) el.closest('.input-row').remove(); });
+  toast('✅ Question ajoutée !');
+}
+
+window.definirReponse = async function(qId, idx) {
+  if (!currentUserData.isAdmin) return;
+  await set(ref(db, `questions/${qId}/reponseCorrecte`), idx);
+  toast('✅ Bonne réponse enregistrée !');
+}
+
+window.repondreQuestion = async function(qId, idx) {
+  await set(ref(db, `reponsesQuestions/${qId}/${currentUser.uid}`), idx);
+  toast('✅ Réponse enregistrée !');
+}
+
+// Afficher les questions dans l'onglet matchs
+function renderQuestions(el) {
+  const qs = Object.entries(questions);
+  if (!qs.length) return;
+  qs.forEach(([qId, q]) => {
+    const myReponse = window._reponsesQuestions?.[qId]?.[currentUser.uid];
+    const locked = q.reponseCorrecte !== null && q.reponseCorrecte !== undefined;
+    const div = document.createElement('div');
+    div.className = 'match-card';
+    div.style.borderLeftColor = '#9b59b6';
+    div.innerHTML = `
+      <div class="match-header">
+        <span class="match-equipes" style="font-size:0.95rem">❓ ${q.question}</span>
+        <span class="match-comp">J${q.journee} · 5 pts</span>
+      </div>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+        ${q.options.map((opt, i) => {
+          const isCorrect = locked && i === q.reponseCorrecte;
+          const isMyChoice = myReponse === i;
+          const bg = isCorrect ? 'var(--vert-clair)' : isMyChoice ? '#444' : '#1a1a1a';
+          return `
+          <div style="display:flex;gap:8px;align-items:center">
+            ${!locked ? `<button onclick="repondreQuestion('${qId}',${i})" style="flex:1;background:${bg};border:1px solid #444;border-radius:8px;color:#fff;padding:8px 12px;text-align:left;cursor:pointer;font-size:0.83rem">${opt} ${isMyChoice ? '✓' : ''}</button>` :
+            `<div style="flex:1;background:${bg};border-radius:8px;padding:8px 12px;font-size:0.83rem;color:#fff">${opt} ${isCorrect ? '✅' : ''} ${isMyChoice && isCorrect ? '+5 🎯' : isMyChoice && !isCorrect ? '❌' : ''}</div>`}
+            ${currentUserData.isAdmin && !locked ? `<button class="btn btn-ghost" style="font-size:0.7rem;padding:4px 8px" onclick="definirReponse('${qId}',${i})">✓ Bonne rép.</button>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+    el.appendChild(div);
+  });
+}
+
+// ---- CŒUR x2 ----
+window.toggleCoeur = async function(journee, matchId) {
+  const dejaUtilise = coeurs[journee]?.[currentUser.uid];
+  if (dejaUtilise && dejaUtilise !== matchId) return toast('Tu as déjà utilisé ton cœur cette journée !', true);
+  if (dejaUtilise === matchId) {
+    await remove(ref(db, `coeurs/${journee}/${currentUser.uid}`));
+    toast('💔 Cœur retiré');
+  } else {
+    await set(ref(db, `coeurs/${journee}/${currentUser.uid}`), matchId);
+    toast('❤️ Cœur activé ! Points doublés sur ce match');
+  }
+}
+
+function monCoeurJournee(journee) {
+  return coeurs[journee]?.[currentUser.uid] || null;
+}
+
+// ---- CHAT ----
+window.envoyerMessage = async function() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  await push(ref(db, 'chat'), {
+    uid: currentUser.uid,
+    pseudo: currentUserData.pseudo,
+    message: msg,
+    timestamp: Date.now()
+  });
+  input.value = '';
+}
+
+function renderChat() {
+  const el = document.getElementById('chat-messages');
+  if (!chatMessages.length) {
+    el.innerHTML = '<div class="empty-state"><span>💬</span>Aucun message pour l\'instant</div>';
+    return;
+  }
+  const sorted = [...chatMessages].sort((a, b) => a.timestamp - b.timestamp);
+  el.innerHTML = sorted.map(m => {
+    const isMe = m.uid === currentUser.uid;
+    const date = new Date(m.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return `
+    <div style="display:flex;flex-direction:column;align-items:${isMe ? 'flex-end' : 'flex-start'}">
+      <div style="font-size:0.7rem;color:var(--texte-gris);margin-bottom:2px">${isMe ? 'Toi' : m.pseudo} · ${date}</div>
+      <div style="background:${isMe ? 'var(--vert-clair)' : 'var(--gris2)'};color:#fff;padding:8px 12px;border-radius:${isMe ? '12px 12px 0 12px' : '12px 12px 12px 0'};max-width:80%;font-size:0.85rem;word-break:break-word">${m.message}</div>
+    </div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
 // ---- JOUEURS ----
 function renderJoueurs() {
   const el = document.getElementById('joueurs-liste');
@@ -1178,7 +1417,7 @@ window.afficherPronosJoueur = function() {
 
   detail.innerHTML = journees.map(journee => {
     const matchsJ = matchs.filter(m => m.journee === journee);
-    const verrou = matchsJ.some(m => estVerrouilleH4Journee(m));
+    const verrou = matchsJ.some(m => estVerrouilleH6Journee(m));
 
     if (!verrou) {
       return `
