@@ -482,7 +482,8 @@ function ecouterDonnees() {
     renderCurrent();
   });
   onValue(ref(db, 'chat'), (snap) => {
-    chatMessages = snap.val() ? Object.values(snap.val()) : [];
+    const data = snap.val() || {};
+    chatMessages = Object.entries(data).map(([key, msg]) => ({ ...msg, key }));
     if (activeTab === 'chat') renderChat();
   });
 }
@@ -1371,14 +1372,23 @@ function renderChat() {
   const sorted = [...chatMessages].sort((a, b) => a.timestamp - b.timestamp);
   el.innerHTML = sorted.map(m => {
     const isMe = m.uid === currentUser.uid;
+    const canDelete = isMe || currentUserData.isAdmin;
     const date = new Date(m.timestamp).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     return `
     <div style="display:flex;flex-direction:column;align-items:${isMe ? 'flex-end' : 'flex-start'}">
-      <div style="font-size:0.7rem;color:var(--texte-gris);margin-bottom:2px">${isMe ? 'Toi' : m.pseudo} · ${date}</div>
+      <div style="font-size:0.7rem;color:var(--texte-gris);margin-bottom:2px;display:flex;align-items:center;gap:6px">
+        ${isMe ? 'Toi' : m.pseudo} · ${date}
+        ${canDelete ? `<button onclick="supprimerMessage('${m.key}')" style="background:none;border:none;color:var(--rouge);cursor:pointer;font-size:0.85rem;padding:0;line-height:1">🗑️</button>` : ''}
+      </div>
       <div style="background:${isMe ? 'var(--vert-clair)' : 'var(--gris2)'};color:#fff;padding:8px 12px;border-radius:${isMe ? '12px 12px 0 12px' : '12px 12px 12px 0'};max-width:80%;font-size:0.85rem;word-break:break-word">${m.message}</div>
     </div>`;
   }).join('');
   el.scrollTop = el.scrollHeight;
+}
+
+window.supprimerMessage = async function(key) {
+  if (!confirm('Supprimer ce message ?')) return;
+  await remove(ref(db, `chat/${key}`));
 }
 
 // ---- JOUEURS ----
