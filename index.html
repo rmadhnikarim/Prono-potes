@@ -360,6 +360,7 @@ let joueursMap = {};
 let questions = {};
 let coeurs = {}; // { journee: { uid: matchId } }
 let chatMessages = [];
+let matchsDoubles = {}; // { journee: matchId } — stocké dans Firebase
 let activeTab = 'matchs';
 let authMode = 'login';
 
@@ -477,6 +478,12 @@ function ecouterDonnees() {
     coeurs = snap.val() || {};
     renderCurrent();
   });
+  onValue(ref(db, 'matchsDoubles'), (snap) => {
+    matchsDoubles = snap.val() || {};
+    renderCurrent();
+    // Admin déclenche le tirage si pas encore fait pour les journées H-6
+    if (currentUserData.isAdmin) tirerAuSortMatchsDoubles();
+  });
   onValue(ref(db, 'reponsesQuestions'), (snap) => {
     window._reponsesQuestions = snap.val() || {};
     renderCurrent();
@@ -540,14 +547,26 @@ function estDebutMatch(match) {
 }
 
 // Tirage au sort déterministe du match double (basé sur la journée, stable)
+// Retourne le match double d'une journée (depuis Firebase)
 function getMatchDouble(journee) {
-  const matchsJ = matchs.filter(m => m.journee === journee);
-  if (!matchsJ.length) return null;
-  // Hash déterministe basé sur le nom de la journée pour que tout le monde voie le même
-  let hash = 0;
-  for (const c of journee) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff;
-  const idx = Math.abs(hash) % matchsJ.length;
-  return matchsJ[idx].id;
+  return matchsDoubles[journee] || null;
+}
+
+// Tirage automatique pour les journées passées H-6 sans match double encore tiré (admin seulement)
+async function tirerAuSortMatchsDoubles() {
+  const journees = [...new Set(matchs.filter(m => m.journee).map(m => m.journee))];
+  for (const journee of journees) {
+    if (matchsDoubles[journee]) continue; // déjà tiré
+    const heureVerrou = getHeureVerrouilJournee(journee);
+    if (!heureVerrou || new Date() < heureVerrou) continue; // pas encore H-6
+    // H-6 passé et pas encore de tirage → on tire au sort
+    const matchsJ = matchs.filter(m => m.journee === journee);
+    if (!matchsJ.length) continue;
+    const idx = Math.floor(Math.random() * matchsJ.length);
+    const matchId = matchsJ[idx].id;
+    await set(ref(db, `matchsDoubles/${journee}`), matchId);
+    toast(`🎲 Match double tiré : ${matchsJ[idx].dom} vs ${matchsJ[idx].ext} !`);
+  }
 }
 
 function formatHeure(iso) {
@@ -1019,6 +1038,27 @@ function renderMesPronos() {
 
   let html = '';
 
+  // Questions bonus ouvertes (pas encore de bonne réponse définie)
+  const questionsOuvertes = Object.entries(questions).filter(([, q]) => q.reponseCorrecte === null || q.reponseCorrecte === undefined);
+  const questionsFermees = Object.entries(questions).filter(([, q]) => q.reponseCorrecte !== null && q.reponseCorrecte !== undefined);
+
+  if (questionsOuvertes.length) {
+    html += `<div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:1px;color:#9b59b6;margin-bottom:8px">❓ Questions bonus</div>`;
+    questionsOuvertes.forEach(([qId, q]) => {
+      const myRep = window._reponsesQuestions?.[qId]?.[currentUser.uid];
+      html += `
+      <div class="card" style="border-left:3px solid #9b59b6">
+        <h3 style="color:#c39bd3">${q.question} <span style="font-size:0.72rem;color:var(--texte-gris)">J${q.journee} · 5 pts</span></h3>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+          ${q.options.map((opt, i) => `
+          <button onclick="repondreQuestion('${qId}',${i})" style="background:${myRep === i ? 'var(--vert-clair)' : '#1a1a1a'};border:1px solid ${myRep === i ? 'var(--vert-clair)' : '#444'};border-radius:8px;color:#fff;padding:10px 14px;text-align:left;cursor:pointer;font-size:0.85rem">
+            ${opt} ${myRep === i ? '✓' : ''}
+          </button>`).join('')}
+        </div>
+      </div>`;
+    });
+  }
+
   if (ouverts.length) {
     html += `<div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:1px;color:var(--vert-clair);margin-bottom:8px">🔓 Matchs à venir</div>`;
     html += ouverts.map(matchCard).join('');
@@ -1028,21 +1068,34 @@ function renderMesPronos() {
     html += `<div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:1px;color:var(--texte-gris);margin:16px 0 8px">📦 Matchs passés</div>`;
     html += journees.map(j => {
       const matchsJ = passes.filter(m => m.journee === j);
+      const qsFermees = questionsFermees.filter(([, q]) => q.journee === j);
       const arcId = `prono-arc-${j.replace(/\s/g,'-')}`;
       return `
       <div class="archive-item" style="margin-bottom:8px">
         <div class="archive-header" onclick="toggleArchive('${arcId}', this)">
-          <span class="archive-titre">📅 Journée ${j} <span style="font-size:0.75rem;color:var(--texte-gris);font-family:'Inter',sans-serif">(${matchsJ.length} match${matchsJ.length > 1 ? 's' : ''})</span></span>
+          <span class="archive-titre">📅 Journée ${j} <span style="font-size:0.75rem;color:var(--texte-gris);font-family:'Inter',sans-serif">(${matchsJ.length} match${matchsJ.length > 1 ? 's' : ''}${qsFermees.length ? ' + ' + qsFermees.length + ' ❓' : ''})</span></span>
           <span class="archive-chevron">▼</span>
         </div>
         <div class="archive-body" id="${arcId}">
           ${matchsJ.map(matchCard).join('')}
+          ${qsFermees.map(([qId, q]) => {
+            const myRep = window._reponsesQuestions?.[qId]?.[currentUser.uid];
+            const correct = myRep === q.reponseCorrecte;
+            return `
+            <div class="card" style="border-left:3px solid #9b59b6;margin-top:8px">
+              <h3 style="color:#c39bd3">${q.question}</h3>
+              <div style="margin-top:6px;font-size:0.83rem">
+                <div style="color:var(--vert-clair)">✅ Bonne réponse : ${q.options[q.reponseCorrecte]}</div>
+                <div style="color:${correct ? 'var(--vert-clair)' : 'var(--rouge)'}">Ta réponse : ${myRep !== undefined ? q.options[myRep] : '—'} ${correct ? '🎯 +5 pts' : myRep !== undefined ? '❌' : ''}</div>
+              </div>
+            </div>`;
+          }).join('')}
         </div>
       </div>`;
     }).join('');
   }
 
-  if (!ouverts.length && !passes.length) {
+  if (!ouverts.length && !passes.length && !questionsOuvertes.length) {
     html = '<div class="empty-state"><span>📅</span>Aucun match disponible</div>';
   }
 
