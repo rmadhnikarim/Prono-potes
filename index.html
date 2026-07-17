@@ -817,6 +817,11 @@ function renderMatchs() {
   }
 
   el.innerHTML = html;
+
+  // Afficher les questions en dessous des matchs
+  const questionsEl = document.createElement('div');
+  renderQuestions(questionsEl);
+  if (questionsEl.innerHTML) el.appendChild(questionsEl);
 }
 
 // ---- MES PRONOS ----
@@ -1349,6 +1354,16 @@ window.definirReponse = async function(qId, idx) {
 }
 
 window.repondreQuestion = async function(qId, idx) {
+  const q = questions[qId];
+  if (!q) return;
+  // Vérifie H-6 de la journée de la question
+  const matchsJ = matchs.filter(m => m.journee === q.journee);
+  if (matchsJ.length) {
+    const heureVerrou = getHeureVerrouilJournee(q.journee);
+    if (heureVerrou && new Date() >= heureVerrou) return toast('🔒 Réponses fermées (H-6 atteint)', true);
+  }
+  // Vérifie si bonne réponse déjà définie
+  if (q.reponseCorrecte !== null && q.reponseCorrecte !== undefined) return toast('🔒 La bonne réponse a déjà été donnée', true);
   await set(ref(db, `reponsesQuestions/${qId}/${currentUser.uid}`), idx);
   toast('✅ Réponse enregistrée !');
 }
