@@ -658,9 +658,14 @@ window.importerSelection = async function() {
     const m = dernierResultatAPI[i];
     const existant = matchs.find(x => x.apiId === m.id);
     if (existant) continue;
+    // On stocke le vrai numéro de journée API (ou stage) séparément
+    const isStage = !m.journee || isNaN(Number(m.journee));
     await push(ref(db, 'matchs'), {
       dom: m.dom, ext: m.ext, comp: NOMS_COMP[m.competition] || m.competition,
-      journee: journeePerso, heure: m.heure, apiId: m.id, apiComp: m.competition,
+      journee: journeePerso, // numéro perso pour le classement
+      apiJournee: isStage ? null : m.journee, // vrai numéro journée API
+      apiStage: isStage ? (m.journeeLabel || null) : null, // vrai stage API
+      heure: m.heure, apiId: m.id, apiComp: m.competition,
       scoreDom: m.scoreDom ?? null, scoreExt: m.scoreExt ?? null
     });
     ajoutes++;
@@ -684,18 +689,20 @@ async function actualiserScoresAPI() {
   const matchsApi = matchs.filter(m => m.apiId && (m.scoreDom === null || m.scoreDom === undefined));
   if (!matchsApi.length) return;
 
-  // Regroupe par compétition + journée OU stage
+  // Regroupe par compétition + apiJournee OU apiStage
   const combos = [...new Set(matchsApi.map(m => {
     const comp = m.apiComp || 'FL1';
-    // Si la journée est un nom de stage (pas un numéro), on utilise le stage
+    if (m.apiStage) return `${comp}|stage|${m.apiStage}`;
+    if (m.apiJournee) return `${comp}|matchday|${m.apiJournee}`;
+    // Fallback : anciens matchs sans apiJournee/apiStage → on essaie avec journee
     const isStage = m.journee && isNaN(Number(m.journee));
     const STAGE_MAP = {
       'Phase de groupes': 'GROUP_STAGE', '32èmes de finale': 'ROUND_OF_32',
       '16èmes de finale': 'ROUND_OF_16', 'Quarts de finale': 'QUARTER_FINALS',
       'Demi-finales': 'SEMI_FINALS', 'Finale': 'FINAL'
     };
-    const stageCode = isStage ? (STAGE_MAP[m.journee] || m.journee) : null;
-    return stageCode ? `${comp}|stage|${stageCode}` : `${comp}|matchday|${m.journee}`;
+    if (isStage) return `${comp}|stage|${STAGE_MAP[m.journee] || m.journee}`;
+    return `${comp}|matchday|${m.journee}`;
   }))];
 
   for (const combo of combos) {
