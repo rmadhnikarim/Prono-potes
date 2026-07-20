@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pronos entre .potes ⚽</title>
+<title>Pronos entre potes ⚽</title>
 <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
@@ -683,12 +683,28 @@ window.actualiserManuellement = async function() {
 async function actualiserScoresAPI() {
   const matchsApi = matchs.filter(m => m.apiId && (m.scoreDom === null || m.scoreDom === undefined));
   if (!matchsApi.length) return;
-  // On regroupe par compétition + journée pour limiter les appels
-  const combos = [...new Set(matchsApi.map(m => `${m.apiComp || 'FL1'}|${m.journee}`))];
+
+  // Regroupe par compétition + journée OU stage
+  const combos = [...new Set(matchsApi.map(m => {
+    const comp = m.apiComp || 'FL1';
+    // Si la journée est un nom de stage (pas un numéro), on utilise le stage
+    const isStage = m.journee && isNaN(Number(m.journee));
+    const STAGE_MAP = {
+      'Phase de groupes': 'GROUP_STAGE', '32èmes de finale': 'ROUND_OF_32',
+      '16èmes de finale': 'ROUND_OF_16', 'Quarts de finale': 'QUARTER_FINALS',
+      'Demi-finales': 'SEMI_FINALS', 'Finale': 'FINAL'
+    };
+    const stageCode = isStage ? (STAGE_MAP[m.journee] || m.journee) : null;
+    return stageCode ? `${comp}|stage|${stageCode}` : `${comp}|matchday|${m.journee}`;
+  }))];
+
   for (const combo of combos) {
-    const [competition, journee] = combo.split('|');
+    const [competition, type, valeur] = combo.split('|');
     try {
-      const res = await fetch(`/.netlify/functions/get-matches?competition=${competition}&matchday=${journee}`);
+      const url = type === 'stage'
+        ? `/.netlify/functions/get-matches?competition=${competition}&stage=${valeur}`
+        : `/.netlify/functions/get-matches?competition=${competition}&matchday=${valeur}`;
+      const res = await fetch(url);
       const data = await res.json();
       if (!data.matchs) continue;
       for (const apiMatch of data.matchs) {
