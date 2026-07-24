@@ -238,7 +238,10 @@
       </div>
       <div class="input-row">
         <input type="text" id="comp-input" placeholder="Compétition" style="flex:2">
-        <input type="number" id="journee-input" placeholder="N° journée" min="1" style="flex:1">
+        <input type="number" id="journee-input" placeholder="N° journée API" min="1" style="flex:1">
+      </div>
+      <div class="input-row">
+        <input type="text" id="weekend-input" placeholder="W-E (ex: W1, W2...)" style="flex:1">
       </div>
       <div class="input-row">
         <div style="flex:1">
@@ -481,7 +484,7 @@ function ecouterDonnees() {
   onValue(ref(db, 'matchsDoubles'), (snap) => {
     matchsDoubles = snap.val() || {};
     renderCurrent();
-    // Admin déclenche le tirage si pas encore fait pour les journées H-6
+    // Admin déclenche le tirage si pas encore fait pour les journées H-12
     if (currentUserData.isAdmin) tirerAuSortMatchsDoubles();
   });
   onValue(ref(db, 'reponsesQuestions'), (snap) => {
@@ -525,15 +528,15 @@ function estVerrouille(match) {
   return new Date() >= new Date(match.heure);
 }
 
-// Retourne l'heure H-6 du premier match d'une journée
+// Retourne l'heure H-12 du premier match d'une journée
 function getHeureVerrouilJournee(journee) {
   const matchsJ = matchs.filter(m => m.journee === journee && m.heure);
   if (!matchsJ.length) return null;
   const premier = matchsJ.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsJ[0]);
-  return new Date(new Date(premier.heure).getTime() - 6 * 60 * 60 * 1000);
+  return new Date(new Date(premier.heure).getTime() - 12 * 60 * 60 * 1000);
 }
 
-// H-6 du 1er match de la journée → pronos verrouillés + visibles
+// H-12 du 1er match de la journée → pronos verrouillés + visibles
 function estVerrouilleH6Journee(match) {
   if (!match.journee) return estVerrouille(match);
   const heureVerrou = getHeureVerrouilJournee(match.journee);
@@ -552,20 +555,19 @@ function getMatchDouble(journee) {
   return matchsDoubles[journee] || null;
 }
 
-// Tirage automatique pour les journées passées H-6 sans match double encore tiré (admin seulement)
+// Tirage automatique pour les journées passées H-12 sans match double encore tiré (admin seulement)
 async function tirerAuSortMatchsDoubles() {
-  const journees = [...new Set(matchs.filter(m => m.journee).map(m => m.journee))];
-  for (const journee of journees) {
-    if (matchsDoubles[journee]) continue; // déjà tiré
-    const heureVerrou = getHeureVerrouilJournee(journee);
-    if (!heureVerrou || new Date() < heureVerrou) continue; // pas encore H-6
-    // H-6 passé et pas encore de tirage → on tire au sort
-    const matchsJ = matchs.filter(m => m.journee === journee);
-    if (!matchsJ.length) continue;
-    const idx = Math.floor(Math.random() * matchsJ.length);
-    const matchId = matchsJ[idx].id;
-    await set(ref(db, `matchsDoubles/${journee}`), matchId);
-    toast(`🎲 Match double tiré : ${matchsJ[idx].dom} vs ${matchsJ[idx].ext} !`);
+  const weekends = getWeekends();
+  for (const weekend of weekends) {
+    if (matchsDoubles[weekend]) continue; // déjà tiré
+    const heureVerrou = getHeureVerrouilWeekend(weekend);
+    if (!heureVerrou || new Date() < heureVerrou) continue; // pas encore H-12
+    const matchsW = getMatchsWeekend(weekend);
+    if (!matchsW.length) continue;
+    const idx = Math.floor(Math.random() * matchsW.length);
+    const matchId = matchsW[idx].id;
+    await set(ref(db, `matchsDoubles/${weekend}`), matchId);
+    toast(`🎲 Match double tiré : ${matchsW[idx].dom} vs ${matchsW[idx].ext} !`);
   }
 }
 
@@ -637,8 +639,8 @@ window.chercherMatchsAPI = async function() {
     if (dernierResultatAPI.some(m => !matchs.some(x => x.apiId === m.id))) {
       previewEl.innerHTML += `
         <div style="margin-top:10px">
-          <label style="display:block;font-size:0.75rem;color:var(--texte-gris);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">Numéro de ta journée (ex: S1, J15, 16èmes...)</label>
-          <input type="text" id="journee-perso-input" placeholder="Ex: S1" style="width:100%;margin-bottom:8px">
+          <label style="display:block;font-size:0.75rem;color:var(--texte-gris);text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">Weekend (ex: W1, W2...)</label>
+          <input type="text" id="weekend-perso-input" placeholder="Ex: W1" style="width:100%;margin-bottom:8px">
         </div>
         <button class="btn btn-vert btn-full" onclick="importerSelection()">📥 Importer la sélection</button>`;
     }
@@ -649,8 +651,8 @@ window.chercherMatchsAPI = async function() {
 
 window.importerSelection = async function() {
   const statusEl = document.getElementById('import-status');
-  const journeePerso = document.getElementById('journee-perso-input')?.value.trim();
-  if (!journeePerso) { toast('Entre un numéro de journée avant d\'importer', true); return; }
+  const weekend = document.getElementById('weekend-perso-input')?.value.trim();
+  if (!weekend) { toast('Entre un W-E avant d\'importer', true); return; }
   let ajoutes = 0;
   for (let i = 0; i < dernierResultatAPI.length; i++) {
     const chk = document.getElementById(`chk-${i}`);
@@ -658,19 +660,19 @@ window.importerSelection = async function() {
     const m = dernierResultatAPI[i];
     const existant = matchs.find(x => x.apiId === m.id);
     if (existant) continue;
-    // On stocke le vrai numéro de journée API (ou stage) séparément
     const isStage = !m.journee || isNaN(Number(m.journee));
     await push(ref(db, 'matchs'), {
       dom: m.dom, ext: m.ext, comp: NOMS_COMP[m.competition] || m.competition,
-      journee: journeePerso, // numéro perso pour le classement
-      apiJournee: isStage ? null : m.journee, // vrai numéro journée API
-      apiStage: isStage ? (m.journeeLabel || null) : null, // vrai stage API
+      journee: m.journee ? String(m.journee) : null, // vrai numéro journée API
+      weekend: weekend, // numéro weekend perso pour le classement
+      apiJournee: isStage ? null : m.journee,
+      apiStage: isStage ? (m.journeeLabel || null) : null,
       heure: m.heure, apiId: m.id, apiComp: m.competition,
       scoreDom: m.scoreDom ?? null, scoreExt: m.scoreExt ?? null
     });
     ajoutes++;
   }
-  statusEl.textContent = `✅ ${ajoutes} match(s) importé(s) dans la journée "${journeePerso}" !`;
+  statusEl.textContent = `✅ ${ajoutes} match(s) importé(s) dans le weekend "${weekend}" !`;
   document.getElementById('import-preview').innerHTML = '';
   toast(`✅ ${ajoutes} matchs ajoutés`);
 }
@@ -732,17 +734,18 @@ window.ajouterMatch = async function() {
   const ext = document.getElementById('ext-input').value.trim();
   const comp = document.getElementById('comp-input').value.trim() || 'Ligue 1';
   const journee = document.getElementById('journee-input').value.trim();
+  const weekend = document.getElementById('weekend-input').value.trim();
   const date = document.getElementById('date-input').value;
   const time = document.getElementById('time-input').value;
   if (!dom || !ext) return toast('Entre les deux équipes', true);
   if (!date || !time) return toast('Entre une date et une heure', true);
-  if (!journee) return toast('Entre le numéro de journée', true);
   const heure = `${date}T${time}`;
-  await push(ref(db, 'matchs'), { dom, ext, comp, journee, heure, scoreDom: null, scoreExt: null });
+  await push(ref(db, 'matchs'), { dom, ext, comp, journee: journee || null, weekend: weekend || null, heure, scoreDom: null, scoreExt: null });
   document.getElementById('dom-input').value = '';
   document.getElementById('ext-input').value = '';
   document.getElementById('comp-input').value = '';
   document.getElementById('journee-input').value = '';
+  document.getElementById('weekend-input').value = '';
   document.getElementById('date-input').value = '';
   document.getElementById('time-input').value = '';
   toast('✅ Match ajouté !');
@@ -850,11 +853,11 @@ function renderMatchs() {
 // ---- MES PRONOS ----
 window.savMonProno = async function(matchId, side, val) {
   const match = matchs.find(m => m.id === matchId);
-  if (estVerrouilleH6Journee(match)) return toast('🔒 Pronos fermés (H-4 atteint)', true);
+  const locked = match?.weekend ? estVerrouilleH12Weekend(match) : estVerrouilleH6Journee(match);
+  if (locked) return toast('🔒 Pronos fermés (H-12 atteint)', true);
   const valInt = parseInt(val);
   if (isNaN(valInt)) return;
   await set(ref(db, `pronos/${matchId}/${currentUser.uid}/${side}`), valInt);
-  // Si l'autre côté n'est pas encore rempli, on le met à 0 automatiquement
   const p = pronos[matchId]?.[currentUser.uid] || {};
   const autreSide = side === 'dom' ? 'ext' : 'dom';
   if (p[autreSide] === undefined) {
@@ -871,6 +874,33 @@ function getIssue(d, e) { return d > e ? 1 : d < e ? -1 : 0; }
 function getJourneesDisponibles() {
   const journees = [...new Set(matchs.filter(m => m.journee).map(m => m.journee))];
   return journees;
+}
+
+function getWeekends() {
+  return [...new Set(matchs.filter(m => m.weekend).map(m => m.weekend))];
+}
+
+function getMatchsWeekend(weekend) {
+  return matchs.filter(m => m.weekend === weekend);
+}
+
+// H-12 basé sur le premier match du weekend
+function getHeureVerrouilWeekend(weekend) {
+  const matchsW = getMatchsWeekend(weekend).filter(m => m.heure);
+  if (!matchsW.length) return null;
+  const premier = matchsW.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsW[0]);
+  return new Date(new Date(premier.heure).getTime() - 12 * 60 * 60 * 1000);
+}
+
+function estVerrouilleH12Weekend(match) {
+  if (!match.weekend) return estVerrouilleH6Journee(match); // fallback
+  const heureVerrou = getHeureVerrouilWeekend(match.weekend);
+  if (!heureVerrou) return false;
+  return new Date() >= heureVerrou;
+}
+
+function getMatchDoubleWeekend(weekend) {
+  return matchsDoubles[weekend] || null;
 }
 
 // Stockage attaque : attaques/journee/uid = { matchId, cibleUid }
@@ -902,21 +932,21 @@ window.annulerAttaque = async function(journee) {
 
 function renderAttaque() {
   const el = document.getElementById('attaque-liste');
-  const journees = getJourneesDisponibles();
-  if (!journees.length) { el.innerHTML = '<div class="empty-state"><span>🗡️</span>Aucune journée disponible</div>'; return; }
+  const weekends = getWeekends();
+  if (!weekends.length) { el.innerHTML = '<div class="empty-state"><span>🗡️</span>Aucun weekend disponible</div>'; return; }
 
-  el.innerHTML = journees.map(journee => {
-    const choixJournee = attaques[journee] || {};
-    const monAttaque = choixJournee[currentUser.uid];
-    const matchsJournee = matchs.filter(m => m.journee === journee);
-    const matchsOuverts = matchsJournee.filter(m => estVerrouilleH6Journee(m) && !estVerrouille(m));
-    const matchsPasses = matchsJournee.filter(m => estVerrouille(m));
-    const matchsEnAttente = matchsJournee.filter(m => !estVerrouilleH6Journee(m));
+  el.innerHTML = weekends.map(weekend => {
+    const choixWeekend = attaques[weekend] || {};
+    const monAttaque = choixWeekend[currentUser.uid];
+    const matchsWeekend = getMatchsWeekend(weekend);
+    const matchsOuverts = matchsWeekend.filter(m => estVerrouilleH12Weekend(m) && !estVerrouille(m));
+    const matchsPasses = matchsWeekend.filter(m => estVerrouille(m));
+    const matchsEnAttente = matchsWeekend.filter(m => !estVerrouilleH12Weekend(m));
     const fenetreOuverte = matchsOuverts.length > 0;
 
     // Compte attaques reçues par cible sur chaque match
     const compteurCibles = {};
-    Object.entries(choixJournee).forEach(([uid, a]) => {
+    Object.entries(choixWeekend).forEach(([uid, a]) => {
       if (!a?.matchId || uid === currentUser.uid) return;
       const key = `${a.matchId}_${a.cibleUid}`;
       compteurCibles[key] = (compteurCibles[key] || 0) + 1;
@@ -925,16 +955,14 @@ function renderAttaque() {
     let contenu = '';
 
     if (monAttaque?.matchId) {
-      // Attaque déjà choisie
       const mAttaque = matchs.find(m => m.id === monAttaque.matchId);
       const ciblePseudo = joueursMap[monAttaque.cibleUid]?.pseudo || '?';
       const matchCommence = mAttaque ? estVerrouille(mAttaque) : false;
       contenu = `
         <div class="cible-choisie-box">🗡️ Tu attaques <strong>${ciblePseudo}</strong> sur <strong>${mAttaque ? mAttaque.dom + ' vs ' + mAttaque.ext : '?'}</strong></div>
-        ${!matchCommence ? `<button class="btn btn-rouge" style="margin-top:8px" onclick="annulerAttaque('${journee}')">Annuler</button>` : ''}`;
+        ${!matchCommence ? `<button class="btn btn-rouge" style="margin-top:8px" onclick="annulerAttaque('${weekend}')">Annuler</button>` : ''}`;
 
     } else if (fenetreOuverte) {
-      // Fenêtre H-6 ouverte → affiche les joueurs avec leurs pronos
       const autresJoueurs = Object.entries(joueursMap).filter(([uid]) => uid !== currentUser.uid);
       const joueurCards = autresJoueurs.map(([uid, j]) => {
         const pronosJoueur = matchsOuverts.map(m => {
@@ -945,21 +973,21 @@ function renderAttaque() {
           const issuesDiff = hasProno && hasMonProno && getIssue(p.dom, p.ext) !== getIssue(monP.dom, monP.ext);
           const nbAttaques = compteurCibles[`${m.id}_${uid}`] || 0;
           const dispo = issuesDiff && nbAttaques < 2;
-          const isDouble = getMatchDouble(journee) === m.id;
+          const isDouble = getMatchDoubleWeekend(weekend) === m.id;
           return `
           <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:${dispo ? '#1a2a1a' : '#1a1a1a'};border-radius:6px;margin-top:4px;border:1px solid ${dispo ? 'var(--vert-clair)' : '#333'}">
             <div style="flex:1;font-size:0.78rem">
               <div>${m.dom} vs ${m.ext} ${isDouble ? '<span class="double-badge">x2</span>' : ''}</div>
               <div style="color:${hasProno ? 'var(--or)' : 'var(--texte-gris)'}">Prono : ${hasProno ? p.dom + ' - ' + p.ext : '—'}</div>
             </div>
-            ${dispo ? `<button class="btn btn-rouge" style="font-size:0.72rem;padding:5px 10px" onclick="choisirAttaque('${journee}','${m.id}','${uid}')">🗡️ Attaquer</button>` :
+            ${dispo ? `<button class="btn btn-rouge" style="font-size:0.72rem;padding:5px 10px" onclick="choisirAttaque('${weekend}','${m.id}','${uid}')">🗡️ Attaquer</button>` :
               !hasProno ? '<span style="font-size:0.72rem;color:var(--texte-gris)">Pas de prono</span>' :
               !issuesDiff ? '<span style="font-size:0.72rem;color:var(--texte-gris)">Même issue</span>' :
               '<span style="font-size:0.72rem;color:var(--texte-gris)">Max 2 attaques</span>'}
           </div>`;
         }).join('');
 
-        const arcId = `att-${journee}-${uid}`.replace(/\s/g,'-');
+        const arcId = `att-${weekend}-${uid}`.replace(/\s/g,'-');
         return `
         <div class="archive-item" style="margin-bottom:6px">
           <div class="archive-header" onclick="toggleArchive('${arcId}',this)">
@@ -978,16 +1006,16 @@ function renderAttaque() {
 
     } else if (matchsEnAttente.length) {
       const premier = matchsEnAttente.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsEnAttente[0]);
-      const h6 = new Date(new Date(premier.heure).getTime() - 6 * 60 * 60 * 1000);
-      contenu = `<div style="color:var(--texte-gris);font-size:0.83rem">⏳ Pronos révélés et attaques possibles le ${h6.toLocaleString('fr-FR', {weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} (H-6)</div>`;
+      const h12 = new Date(new Date(premier.heure).getTime() - 12 * 60 * 60 * 1000);
+      contenu = `<div style="color:var(--texte-gris);font-size:0.83rem">⏳ Pronos révélés et attaques possibles le ${h12.toLocaleString('fr-FR', {weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} (H-12)</div>`;
     } else {
-      contenu = `<div style="color:var(--texte-gris);font-size:0.83rem">🔒 Journée terminée</div>`;
+      contenu = `<div style="color:var(--texte-gris);font-size:0.83rem">🔒 Weekend terminé</div>`;
     }
 
     return `
-    <div class="attaque-card ${monAttaque ? 'choisie' : ''} ${matchsPasses.length === matchsJournee.length ? 'fermee' : ''}">
-      <div class="attaque-journee-titre">Journée ${journee} ${getMatchDouble(journee) && fenetreOuverte ? '<span class="double-badge" style="font-size:0.7rem">🎲 Match double révélé</span>' : ''}</div>
-      <div class="attaque-sous">${fenetreOuverte ? '🔓 Fenêtre d\'attaque ouverte' : matchsPasses.length === matchsJournee.length ? '🔒 Journée terminée' : '⏳ En attente de H-6'}</div>
+    <div class="attaque-card ${monAttaque ? 'choisie' : ''} ${matchsPasses.length === matchsWeekend.length ? 'fermee' : ''}">
+      <div class="attaque-journee-titre">${weekend} ${getMatchDoubleWeekend(weekend) && fenetreOuverte ? '<span class="double-badge" style="font-size:0.7rem">🎲 Match double révélé</span>' : ''}</div>
+      <div class="attaque-sous">${fenetreOuverte ? '🔓 Fenêtre d\'attaque ouverte' : matchsPasses.length === matchsWeekend.length ? '🔒 Weekend terminé' : '⏳ En attente de H-12'}</div>
       ${contenu}
     </div>`;
   }).join('');
@@ -998,7 +1026,7 @@ function renderMesPronos() {
   if (!matchs.length) { el.innerHTML = '<div class="empty-state"><span>📅</span>Aucun match disponible</div>'; return; }
 
   function matchCard(m) {
-    const lockedH4 = estVerrouilleH6Journee(m);
+    const lockedH4 = m.weekend ? estVerrouilleH12Weekend(m) : estVerrouilleH6Journee(m);
     const lockedH0 = estVerrouille(m);
     const hasScore = m.scoreDom !== null && m.scoreDom !== undefined;
     const p = pronos[m.id]?.[currentUser.uid] || {};
@@ -1041,8 +1069,8 @@ function renderMesPronos() {
 
     return `
     <div class="card">
-      ${m.journee && getMatchDouble(m.journee) === m.id ? '<div class="match-double-banner">🎲 MATCH DOUBLE — Points x2 !</div>' : ''}
-      <h3>${m.dom} vs ${m.ext} <span style="font-size:0.72rem;color:var(--texte-gris)">${m.comp}</span></h3>
+      ${m.weekend && getMatchDoubleWeekend(m.weekend) === m.id ? '<div class="match-double-banner">🎲 MATCH DOUBLE — Points x2 !</div>' : ''}
+      <h3>${m.dom} vs ${m.ext} <span style="font-size:0.72rem;color:var(--texte-gris)">${m.comp}${m.weekend ? ' · ' + m.weekend : ''}</span></h3>
       <div class="match-heure">🕐 ${formatHeure(m.heure)} ${statutBadge}</div>
       <div class="mes-pronos-row ${lockedH4 ? 'locked' : ''}">
         <span>Ton prono :</span>
@@ -1051,18 +1079,26 @@ function renderMesPronos() {
         <span class="vs-txt">-</span>
         <input type="number" min="0" max="20" placeholder="0" value="${p.ext ?? ''}" ${lockedH4 ? 'disabled' : ''}
           onchange="savMonProno('${m.id}','ext',this.value)">
-        ${!lockedH4 && m.journee ? `<button class="coeur-btn ${monCoeurJournee(m.journee) === m.id ? 'actif' : ''}" onclick="toggleCoeur('${m.journee}','${m.id}')" title="Doubler les points de ce match">${monCoeurJournee(m.journee) === m.id ? '❤️' : '🤍'}</button>` : monCoeurJournee(m.journee) === m.id ? '<span>❤️ x2</span>' : ''}
+        ${!lockedH4 && m.weekend ? `<button class="coeur-btn ${monCoeurWeekend(m.weekend) === m.id ? 'actif' : ''}" onclick="toggleCoeur('${m.weekend}','${m.id}')" title="Doubler les points de ce match">${monCoeurWeekend(m.weekend) === m.id ? '❤️' : '🤍'}</button>` : m.weekend && monCoeurWeekend(m.weekend) === m.id ? '<span>❤️ x2</span>' : ''}
         ${badge}
       </div>
       ${groupePronos}
     </div>`;
   }
 
-  // Matchs ouverts (pas encore verrouillés) → affichés normalement en haut
-  const ouverts = matchs.filter(m => !estVerrouille(m));
-  // Matchs passés (verrouillés) → regroupés par journée en accordéon
-  const passes = matchs.filter(m => estVerrouille(m));
-  const journees = [...new Set(passes.filter(m => m.journee).map(m => m.journee))];
+  // Matchs ouverts (pas encore verrouillés)
+  const ouverts = matchs.filter(m => {
+    const locked = m.weekend ? estVerrouilleH12Weekend(m) : estVerrouilleH6Journee(m);
+    return !locked;
+  });
+  // Matchs verrouillés → regroupés par weekend en accordéon
+  const passes = matchs.filter(m => {
+    const locked = m.weekend ? estVerrouilleH12Weekend(m) : estVerrouilleH6Journee(m);
+    return locked;
+  });
+  const weekends = [...new Set(passes.filter(m => m.weekend).map(m => m.weekend))];
+  // Matchs sans weekend → groupés séparément
+  const passesSansWE = passes.filter(m => !m.weekend);
 
   let html = '';
 
@@ -1092,20 +1128,20 @@ function renderMesPronos() {
     html += ouverts.map(matchCard).join('');
   }
 
-  if (journees.length) {
+  if (weekends.length) {
     html += `<div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:1px;color:var(--texte-gris);margin:16px 0 8px">📦 Matchs passés</div>`;
-    html += journees.map(j => {
-      const matchsJ = passes.filter(m => m.journee === j);
-      const qsFermees = questionsFermees.filter(([, q]) => q.journee === j);
-      const arcId = `prono-arc-${j.replace(/\s/g,'-')}`;
+    html += weekends.map(we => {
+      const matchsW = passes.filter(m => m.weekend === we);
+      const qsFermees = questionsFermees.filter(([, q]) => q.journee === we);
+      const arcId = `prono-arc-${we.replace(/\s/g,'-')}`;
       return `
       <div class="archive-item" style="margin-bottom:8px">
         <div class="archive-header" onclick="toggleArchive('${arcId}', this)">
-          <span class="archive-titre">📅 Journée ${j} <span style="font-size:0.75rem;color:var(--texte-gris);font-family:'Inter',sans-serif">(${matchsJ.length} match${matchsJ.length > 1 ? 's' : ''}${qsFermees.length ? ' + ' + qsFermees.length + ' ❓' : ''})</span></span>
+          <span class="archive-titre">🗓️ ${we} <span style="font-size:0.75rem;color:var(--texte-gris);font-family:'Inter',sans-serif">(${matchsW.length} match${matchsW.length > 1 ? 's' : ''}${qsFermees.length ? ' + ' + qsFermees.length + ' ❓' : ''})</span></span>
           <span class="archive-chevron">▼</span>
         </div>
         <div class="archive-body" id="${arcId}">
-          ${matchsJ.map(matchCard).join('')}
+          ${matchsW.map(matchCard).join('')}
           ${qsFermees.map(([qId, q]) => {
             const myRep = window._reponsesQuestions?.[qId]?.[currentUser.uid];
             const correct = myRep === q.reponseCorrecte;
@@ -1121,6 +1157,25 @@ function renderMesPronos() {
         </div>
       </div>`;
     }).join('');
+  }
+
+  // Matchs sans weekend (anciens matchs) → groupés par journée
+  if (passesSansWE.length) {
+    const journeesSansWE = [...new Set(passesSansWE.filter(m => m.journee).map(m => m.journee))];
+    if (journeesSansWE.length) {
+      html += journeesSansWE.map(j => {
+        const matchsJ = passesSansWE.filter(m => m.journee === j);
+        const arcId = `prono-arc-old-${j.replace(/\s/g,'-')}`;
+        return `
+        <div class="archive-item" style="margin-bottom:8px">
+          <div class="archive-header" onclick="toggleArchive('${arcId}', this)">
+            <span class="archive-titre">📅 J${j} <span style="font-size:0.75rem;color:var(--texte-gris);font-family:'Inter',sans-serif">(${matchsJ.length} match${matchsJ.length > 1 ? 's' : ''})</span></span>
+            <span class="archive-chevron">▼</span>
+          </div>
+          <div class="archive-body" id="${arcId}">${matchsJ.map(matchCard).join('')}</div>
+        </div>`;
+      }).join('');
+    }
   }
 
   if (!ouverts.length && !passes.length && !questionsOuvertes.length) {
@@ -1142,10 +1197,10 @@ function getPtsMatch(uid, m) {
 }
 
 function getMultiplier(uid, m) {
-  if (!m.journee) return 1;
+  const we = m.weekend;
   let mult = 1;
-  if (getMatchDouble(m.journee) === m.id) mult *= 2; // match tiré au sort x2
-  if (coeurs[m.journee]?.[uid] === m.id) mult *= 2; // cœur x2
+  if (we && getMatchDoubleWeekend(we) === m.id) mult *= 2; // match tiré au sort x2
+  if (we && coeurs[we]?.[uid] === m.id) mult *= 2; // cœur x2
   return mult;
 }
 
@@ -1251,44 +1306,46 @@ function renderClassement() {
 }
 
 // ---- ARCHIVES PAR JOURNÉE ----
-function calculerPointsJournee(journee) {
+function calculerPointsWeekend(weekend) {
   const scores = {};
   Object.entries(joueursMap).forEach(([uid, j]) => scores[uid] = { pseudo: j.pseudo, pts: 0, exacts: 0, issues: 0, voles: 0, vole: 0 });
-  const matchsJournee = matchs.filter(m => m.journee === journee && m.scoreDom !== null && m.scoreDom !== undefined);
+  const matchsW = matchs.filter(m => m.weekend === weekend && m.scoreDom !== null && m.scoreDom !== undefined);
 
-  matchsJournee.forEach(m => {
+  matchsW.forEach(m => {
     const issueReel = getIssue(m.scoreDom, m.scoreExt);
     Object.keys(joueursMap).forEach(uid => {
       const p = pronos[m.id]?.[uid];
       if (!p || p.dom === undefined || p.ext === undefined) return;
       if (!scores[uid]) return;
-      if (p.dom === m.scoreDom && p.ext === m.scoreExt) { scores[uid].pts += 3; scores[uid].exacts++; }
-      else if (getIssue(p.dom, p.ext) === issueReel) { scores[uid].pts += 1; scores[uid].issues++; }
+      const pts = p.dom === m.scoreDom && p.ext === m.scoreExt ? 3 : getIssue(p.dom, p.ext) === issueReel ? 1 : 0;
+      if (pts === 3) scores[uid].exacts++;
+      else if (pts === 1) scores[uid].issues++;
+      const mult = getMultiplier(uid, m);
+      scores[uid].pts += pts * mult;
     });
   });
 
-  // Attaques de la journée
-  const choixJournee = attaques[journee] || {};
-  Object.entries(choixJournee).forEach(([attaquantUid, attaque]) => {
+  // Attaques du weekend
+  const choixWeekend = attaques[weekend] || {};
+  Object.entries(choixWeekend).forEach(([attaquantUid, attaque]) => {
     const cibleUid = attaque?.cibleUid || (typeof attaque === 'string' ? attaque : null);
     const matchId = attaque?.matchId || null;
     if (!cibleUid || !scores[attaquantUid] || !scores[cibleUid]) return;
-    const matchsCibles = matchId
-      ? matchsJournee.filter(m => m.id === matchId)
-      : matchsJournee;
+    const matchsCibles = matchId ? matchsW.filter(m => m.id === matchId) : matchsW;
     matchsCibles.forEach(m => {
       const pAtt = pronos[m.id]?.[attaquantUid];
       const pCible = pronos[m.id]?.[cibleUid];
-      if (!pAtt || pAtt.dom === undefined) return;
-      if (!pCible || pCible.dom === undefined) return;
+      if (!pAtt || pAtt.dom === undefined || !pCible || pCible.dom === undefined) return;
       const issueAtt = getIssue(pAtt.dom, pAtt.ext);
       const issueCible = getIssue(pCible.dom, pCible.ext);
       if (issueAtt === issueCible) return;
       const issueReel = getIssue(m.scoreDom, m.scoreExt);
-      let vol = 0;
-      if (pAtt.dom === m.scoreDom && pAtt.ext === m.scoreExt) vol = 2;
-      else if (issueAtt === issueReel) vol = 1;
-      if (vol > 0) {
+      const isDouble = getMatchDoubleWeekend(weekend) === m.id;
+      let vol = 2 * (isDouble ? 2 : 1);
+      if (issueCible === issueReel && issueAtt !== issueReel) {
+        scores[cibleUid].pts += vol; scores[cibleUid].voles += vol;
+        scores[attaquantUid].pts -= vol; scores[attaquantUid].vole += vol;
+      } else if (issueAtt === issueReel && issueCible !== issueReel) {
         scores[attaquantUid].pts += vol; scores[attaquantUid].voles += vol;
         scores[cibleUid].pts -= vol; scores[cibleUid].vole += vol;
       }
@@ -1300,13 +1357,15 @@ function calculerPointsJournee(journee) {
 
 function renderArchives() {
   const el = document.getElementById('archives-liste');
-  const journees = [...new Set(matchs.filter(m => m.journee).map(m => m.journee))];
-  if (!journees.length) { el.innerHTML = '<div class="empty-state"><span>📅</span>Aucune journée disponible</div>'; return; }
+  const weekends = getWeekends();
+  if (!weekends.length) { el.innerHTML = '<div class="empty-state"><span>📅</span>Aucun weekend disponible</div>'; return; }
 
-  el.innerHTML = journees.map(j => {
-    const sorted = calculerPointsJournee(j);
-    const matchsJ = matchs.filter(m => m.journee === j);
-    const termines = matchsJ.filter(m => m.scoreDom !== null && m.scoreDom !== undefined).length;
+  el.innerHTML = weekends.map(we => {
+    const sorted = calculerPointsWeekend(we);
+    const matchsW = getMatchsWeekend(we);
+    const termines = matchsW.filter(m => m.scoreDom !== null && m.scoreDom !== undefined).length;
+    const matchDouble = getMatchDoubleWeekend(we);
+    const matchDoubleNom = matchDouble ? matchsW.find(m => m.id === matchDouble) : null;
     const rows = sorted.filter(s => s.pts !== 0 || s.exacts > 0).map((s, i) => `
       <tr>
         <td class="rang">${i+1}</td>
@@ -1320,14 +1379,14 @@ function renderArchives() {
 
     return `
     <div class="archive-item">
-      <div class="archive-header" onclick="toggleArchive('arc-${j}', this)">
+      <div class="archive-header" onclick="toggleArchive('arc-${we.replace(/\s/g,'-')}', this)">
         <div>
-          <span class="archive-titre">📅 Journée ${j}</span>
-          <span style="font-size:0.72rem;color:var(--texte-gris);margin-left:8px">${termines}/${matchsJ.length} matchs terminés</span>
+          <span class="archive-titre">🗓️ ${we}</span>
+          <span style="font-size:0.72rem;color:var(--texte-gris);margin-left:8px">${termines}/${matchsW.length} matchs terminés${matchDoubleNom ? ' · 🎲 ' + matchDoubleNom.dom + ' vs ' + matchDoubleNom.ext : ''}</span>
         </div>
         <span class="archive-chevron">▼</span>
       </div>
-      <div class="archive-body" id="arc-${j.replace(/\s/g,'-')}">
+      <div class="archive-body" id="arc-${we.replace(/\s/g,'-')}">
         ${rows ? `<table class="classement-table" style="margin-top:4px">
           <thead><tr><th>#</th><th>Joueur</th><th>Pts</th><th>✓</th><th>~</th><th>🗡️</th><th>💀</th></tr></thead>
           <tbody>${rows}</tbody>
@@ -1379,11 +1438,11 @@ window.definirReponse = async function(qId, idx) {
 window.repondreQuestion = async function(qId, idx) {
   const q = questions[qId];
   if (!q) return;
-  // Vérifie H-6 de la journée de la question
+  // Vérifie H-12 de la journée de la question
   const matchsJ = matchs.filter(m => m.journee === q.journee);
   if (matchsJ.length) {
     const heureVerrou = getHeureVerrouilJournee(q.journee);
-    if (heureVerrou && new Date() >= heureVerrou) return toast('🔒 Réponses fermées (H-6 atteint)', true);
+    if (heureVerrou && new Date() >= heureVerrou) return toast('🔒 Réponses fermées (H-12 atteint)', true);
   }
   // Vérifie si bonne réponse déjà définie
   if (q.reponseCorrecte !== null && q.reponseCorrecte !== undefined) return toast('🔒 La bonne réponse a déjà été donnée', true);
@@ -1424,20 +1483,20 @@ function renderQuestions(el) {
 }
 
 // ---- CŒUR x2 ----
-window.toggleCoeur = async function(journee, matchId) {
-  const dejaUtilise = coeurs[journee]?.[currentUser.uid];
-  if (dejaUtilise && dejaUtilise !== matchId) return toast('Tu as déjà utilisé ton cœur cette journée !', true);
+window.toggleCoeur = async function(weekend, matchId) {
+  const dejaUtilise = coeurs[weekend]?.[currentUser.uid];
+  if (dejaUtilise && dejaUtilise !== matchId) return toast('Tu as déjà utilisé ton cœur ce weekend !', true);
   if (dejaUtilise === matchId) {
-    await remove(ref(db, `coeurs/${journee}/${currentUser.uid}`));
+    await remove(ref(db, `coeurs/${weekend}/${currentUser.uid}`));
     toast('💔 Cœur retiré');
   } else {
-    await set(ref(db, `coeurs/${journee}/${currentUser.uid}`), matchId);
+    await set(ref(db, `coeurs/${weekend}/${currentUser.uid}`), matchId);
     toast('❤️ Cœur activé ! Points doublés sur ce match');
   }
 }
 
-function monCoeurJournee(journee) {
-  return coeurs[journee]?.[currentUser.uid] || null;
+function monCoeurWeekend(weekend) {
+  return coeurs[weekend]?.[currentUser.uid] || null;
 }
 
 // ---- CHAT ----
