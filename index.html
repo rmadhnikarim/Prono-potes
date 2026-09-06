@@ -1376,7 +1376,7 @@ function renderArchives() {
     const termines = matchsW.filter(m => m.scoreDom !== null && m.scoreDom !== undefined).length;
     const matchDouble = getMatchDoubleWeekend(we);
     const matchDoubleNom = matchDouble ? matchsW.find(m => m.id === matchDouble) : null;
-    const rows = sorted.filter(s => s.pts !== 0 || s.exacts > 0).map((s, i) => `
+    const rows = sorted.map((s, i) => `
       <tr>
         <td class="rang">${i+1}</td>
         <td>${s.pseudo}</td>
