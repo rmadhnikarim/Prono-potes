@@ -9,6 +9,46 @@
 <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#1a7a3c">
+<script>
+// Enregistrement du Service Worker pour les notifications
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(e => console.log('SW error:', e));
+}
+
+// Demande la permission et programme les notifications H-24
+async function setupNotifications() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    await Notification.requestPermission();
+  }
+  if (Notification.permission !== 'granted') return;
+  verifierNotificationsH24();
+}
+
+function verifierNotificationsH24() {
+  // Récupère les weekends depuis localStorage (mis à jour par l'appli)
+  const data = JSON.parse(localStorage.getItem('pronos_notif_data') || '{}');
+  const weekends = data.weekends || [];
+  const now = new Date();
+
+  weekends.forEach(we => {
+    const heureH24 = new Date(we.premierMatch - 24 * 60 * 60 * 1000);
+    const heureH12 = new Date(we.premierMatch - 12 * 60 * 60 * 1000);
+    const dejaNotiفié = localStorage.getItem(`notif_${we.id}`);
+
+    // Si on est entre H-24 et H-12 et pas encore notifié
+    if (now >= heureH24 && now < heureH12 && !dejaNotiفié) {
+      new Notification('⚽ Pronos entre potes', {
+        body: `N'oublie pas tes pronos du ${we.id} ! Clôture dans moins de 24h 🔒`,
+        icon: '/icon-192.png',
+        badge: '/icon-32.png',
+        tag: `pronos-${we.id}`
+      });
+      localStorage.setItem(`notif_${we.id}`, '1');
+    }
+  });
+}
+</script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -452,8 +492,9 @@ onAuthStateChanged(auth, async (user) => {
     document.getElementById('admin-add-question').style.display = currentUserData.isAdmin ? 'block' : 'none';
     ecouterDonnees();
     if (currentUserData.isAdmin) {
-      setInterval(actualiserScoresAPI, 5 * 60 * 1000); // toutes les 5 min
+      setInterval(actualiserScoresAPI, 5 * 60 * 1000);
     }
+    setupNotifications();
   } else {
     currentUser = null;
     document.getElementById('auth-screen').style.display = 'flex';
@@ -470,6 +511,15 @@ function ecouterDonnees() {
     const data = snap.val() || {};
     matchs = Object.entries(data).map(([id, m]) => ({ id, ...m })).sort((a,b) => new Date(a.heure) - new Date(b.heure));
     renderCurrent();
+    // Met à jour les données pour les notifications
+    const weekends = getWeekends().map(we => {
+      const matchsW = getMatchsWeekend(we).filter(m => m.heure);
+      if (!matchsW.length) return null;
+      const premier = matchsW.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsW[0]);
+      return { id: we, premierMatch: new Date(premier.heure).getTime() };
+    }).filter(Boolean);
+    localStorage.setItem('pronos_notif_data', JSON.stringify({ weekends }));
+    verifierNotificationsH24();
   });
   onValue(ref(db, 'pronos'), (snap) => {
     pronos = snap.val() || {};
