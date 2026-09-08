@@ -86,6 +86,7 @@
   .coeur-btn:hover { transform: scale(1.2); }
   .double-badge { background: linear-gradient(135deg, #f0b429, #e03434); color: #fff; font-size: 0.7rem; padding: 2px 7px; border-radius: 6px; font-weight: 700; }
   .match-double-banner { background: linear-gradient(135deg, #f0b429 0%, #c87800 100%); color: #000; font-size: 0.78rem; font-weight: 700; padding: 5px 10px; border-radius: 6px; margin-bottom: 6px; text-align: center; }
+  .weekend-tag { font-size: 0.68rem; padding: 2px 7px; border-radius: 10px; font-weight: 700; }
 
   .podium { display: flex; justify-content: center; gap: 10px; margin-bottom: 18px; align-items: flex-end; }
   .podium-item { text-align: center; padding: 10px; border-radius: 10px; min-width: 85px; }
@@ -194,6 +195,7 @@
     <button class="tab" onclick="showTab('attaque', this)">🗡️ Attaque</button>
     <button class="tab" onclick="showTab('classement', this)">🏆 Classement</button>
     <button class="tab" onclick="showTab('joueurs', this)">👥 Joueurs</button>
+    <button class="tab" onclick="showTab('questions-tab', this)">❓ Questions</button>
     <button class="tab" onclick="showTab('chat', this)">💬 Chat</button>
   </div>
 
@@ -290,7 +292,7 @@
     <div id="podium-zone"></div>
     <div class="card">
       <table class="classement-table">
-        <thead><tr><th>#</th><th>Joueur</th><th>Pts</th><th>Exacts</th><th>Issues</th><th>🗡️</th><th>💀</th></tr></thead>
+        <thead><tr><th>#</th><th>Joueur</th><th>Pts</th><th>✓</th><th>~</th><th>❓</th><th>🗡️</th><th>💀</th></tr></thead>
         <tbody id="classement-body"><tr><td colspan="7"><div class="loading">Chargement...</div></td></tr></tbody>
       </table>
     </div>
@@ -310,6 +312,10 @@
       </select>
       <div id="joueur-pronos-detail" style="margin-top:12px"></div>
     </div>
+  </div>
+
+  <div id="questions-tab" class="section">
+    <div id="questions-tab-liste"><div class="loading">Chargement...</div></div>
   </div>
 
   <div id="chat" class="section">
@@ -513,6 +519,7 @@ function renderCurrent() {
   else if (activeTab === 'attaque') renderAttaque();
   else if (activeTab === 'classement') renderClassement();
   else if (activeTab === 'joueurs') renderJoueurs();
+  else if (activeTab === 'questions-tab') renderQuestionsTab();
   else if (activeTab === 'chat') renderChat();
 }
 
@@ -855,7 +862,8 @@ window.savMonProno = async function(matchId, side, val) {
   const match = matchs.find(m => m.id === matchId);
   const locked = match?.weekend ? estVerrouilleH12Weekend(match) : estVerrouilleH6Journee(match);
   if (locked) return toast('🔒 Pronos fermés (H-12 atteint)', true);
-  const valInt = parseInt(val);
+  if (val === '' || val === undefined) return;
+  const valInt = parseInt(val); // 5 pour "5+"
   if (isNaN(valInt)) return;
   await set(ref(db, `pronos/${matchId}/${currentUser.uid}/${side}`), valInt);
   const p = pronos[matchId]?.[currentUser.uid] || {};
@@ -869,6 +877,15 @@ window.savMonProno = async function(matchId, side, val) {
 }
 
 function getIssue(d, e) { return d > e ? 1 : d < e ? -1 : 0; }
+
+// Palette de couleurs par weekend
+const WEEKEND_COLORS = ['#e74c3c','#3498db','#9b59b6','#e67e22','#1abc9c','#e91e8c','#00bcd4','#ff5722','#8bc34a','#ffc107','#673ab7','#009688'];
+function getWeekendColor(weekend) {
+  if (!weekend) return '#333';
+  let hash = 0;
+  for (const c of weekend) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff;
+  return WEEKEND_COLORS[Math.abs(hash) % WEEKEND_COLORS.length];
+}
 
 // ---- ATTAQUE ----
 function getJourneesDisponibles() {
@@ -958,9 +975,20 @@ function renderAttaque() {
       const mAttaque = matchs.find(m => m.id === monAttaque.matchId);
       const ciblePseudo = joueursMap[monAttaque.cibleUid]?.pseudo || '?';
       const matchCommence = mAttaque ? estVerrouille(mAttaque) : false;
+
+      // Attaques reçues par moi ce weekend
+      const attaquesRecues = Object.entries(choixWeekend)
+        .filter(([uid, a]) => uid !== currentUser.uid && a?.cibleUid === currentUser.uid)
+        .map(([uid, a]) => {
+          const attaquant = joueursMap[uid]?.pseudo || '?';
+          const mRec = matchs.find(m => m.id === a?.matchId);
+          return `<div style="background:rgba(224,52,52,0.1);border:1px solid var(--rouge);border-radius:8px;padding:8px 12px;font-size:0.82rem;margin-top:6px">⚔️ <strong>${attaquant}</strong> t'attaque sur <strong>${mRec ? mRec.dom + ' vs ' + mRec.ext : '?'}</strong></div>`;
+        }).join('');
+
       contenu = `
         <div class="cible-choisie-box">🗡️ Tu attaques <strong>${ciblePseudo}</strong> sur <strong>${mAttaque ? mAttaque.dom + ' vs ' + mAttaque.ext : '?'}</strong></div>
-        ${!matchCommence ? `<button class="btn btn-rouge" style="margin-top:8px" onclick="annulerAttaque('${weekend}')">Annuler</button>` : ''}`;
+        ${!matchCommence ? `<button class="btn btn-rouge" style="margin-top:8px" onclick="annulerAttaque('${weekend}')">Annuler</button>` : ''}
+        ${attaquesRecues}`;
 
     } else if (fenetreOuverte) {
       const autresJoueurs = Object.entries(joueursMap).filter(([uid]) => uid !== currentUser.uid);
@@ -1002,7 +1030,17 @@ function renderAttaque() {
 
       contenu = `
         <div style="font-size:0.78rem;color:var(--or);margin-bottom:10px">👁️ Pronos révélés — clique sur un joueur pour voir ses pronos et attaquer !</div>
-        ${joueurCards}`;
+        ${joueurCards}
+        ${(() => {
+          const recues = Object.entries(choixWeekend)
+            .filter(([uid, a]) => uid !== currentUser.uid && a?.cibleUid === currentUser.uid)
+            .map(([uid, a]) => {
+              const attaquant = joueursMap[uid]?.pseudo || '?';
+              const mRec = matchs.find(m => m.id === a?.matchId);
+              return `<div style="background:rgba(224,52,52,0.1);border:1px solid var(--rouge);border-radius:8px;padding:8px 12px;font-size:0.82rem;margin-top:6px">⚔️ <strong>${attaquant}</strong> t'attaque sur <strong>${mRec ? mRec.dom + ' vs ' + mRec.ext : '?'}</strong></div>`;
+            }).join('');
+          return recues ? `<div style="margin-top:12px;font-size:0.78rem;color:var(--rouge);font-weight:700">🎯 Attaques reçues :</div>${recues}` : '';
+        })()}`;
 
     } else if (matchsEnAttente.length) {
       const premier = matchsEnAttente.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsEnAttente[0]);
@@ -1067,18 +1105,28 @@ function renderMesPronos() {
         </div>`;
     }
 
+    const weColor = getWeekendColor(m.weekend);
+    const scoreOptions = ['0','1','2','3','4','5+'].map((v,i) => `<option value="${i === 5 ? 5 : i}" ${p.dom === (i===5?5:i) ? 'selected' : ''}>${v}</option>`).join('');
+    const scoreOptionsExt = ['0','1','2','3','4','5+'].map((v,i) => `<option value="${i === 5 ? 5 : i}" ${p.ext === (i===5?5:i) ? 'selected' : ''}>${v}</option>`).join('');
+
     return `
-    <div class="card">
+    <div class="card" style="border-left:4px solid ${weColor}">
       ${m.weekend && getMatchDoubleWeekend(m.weekend) === m.id ? '<div class="match-double-banner">🎲 MATCH DOUBLE — Points x2 !</div>' : ''}
-      <h3>${m.dom} vs ${m.ext} <span style="font-size:0.72rem;color:var(--texte-gris)">${m.comp}${m.weekend ? ' · ' + m.weekend : ''}</span></h3>
+      <h3>${m.dom} vs ${m.ext} <span style="font-size:0.72rem;color:var(--texte-gris)">${m.comp}</span> ${m.weekend ? `<span class="weekend-tag" style="background:${weColor}33;color:${weColor}">${m.weekend}</span>` : ''}</h3>
       <div class="match-heure">🕐 ${formatHeure(m.heure)} ${statutBadge}</div>
       <div class="mes-pronos-row ${lockedH4 ? 'locked' : ''}">
         <span>Ton prono :</span>
-        <input type="number" min="0" max="20" placeholder="0" value="${p.dom ?? ''}" ${lockedH4 ? 'disabled' : ''}
-          onchange="savMonProno('${m.id}','dom',this.value)">
-        <span class="vs-txt">-</span>
-        <input type="number" min="0" max="20" placeholder="0" value="${p.ext ?? ''}" ${lockedH4 ? 'disabled' : ''}
-          onchange="savMonProno('${m.id}','ext',this.value)">
+        ${!lockedH4 ? `
+          <select onchange="savMonProno('${m.id}','dom',this.value)" style="background:var(--gris2);border:1px solid #444;border-radius:8px;color:#fff;padding:8px;font-size:0.9rem">
+            <option value="">-</option>${scoreOptions}
+          </select>
+          <span class="vs-txt">-</span>
+          <select onchange="savMonProno('${m.id}','ext',this.value)" style="background:var(--gris2);border:1px solid #444;border-radius:8px;color:#fff;padding:8px;font-size:0.9rem">
+            <option value="">-</option>${scoreOptionsExt}
+          </select>
+        ` : `
+          <span style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;color:var(--or)">${p.dom ?? '?'} - ${p.ext ?? '?'}</span>
+        `}
         ${!lockedH4 && m.weekend ? `<button class="coeur-btn ${monCoeurWeekend(m.weekend) === m.id ? 'actif' : ''}" onclick="toggleCoeur('${m.weekend}','${m.id}')" title="Doubler les points de ce match">${monCoeurWeekend(m.weekend) === m.id ? '❤️' : '🤍'}</button>` : m.weekend && monCoeurWeekend(m.weekend) === m.id ? '<span>❤️ x2</span>' : ''}
         ${badge}
       </div>
@@ -1206,7 +1254,7 @@ function getMultiplier(uid, m) {
 
 function calculerPoints() {
   const scores = {};
-  Object.entries(joueursMap).forEach(([uid, j]) => scores[uid] = { pseudo: j.pseudo, pts: 0, exacts: 0, issues: 0, voles: 0, vole: 0 });
+  Object.entries(joueursMap).forEach(([uid, j]) => scores[uid] = { pseudo: j.pseudo, pts: 0, exacts: 0, issues: 0, voles: 0, vole: 0, qpts: 0 });
 
   // Points des matchs (avec multiplicateurs)
   matchs.forEach(m => {
@@ -1226,7 +1274,7 @@ function calculerPoints() {
     if (q.reponseCorrecte === null || q.reponseCorrecte === undefined) return;
     const reponsesQ = window._reponsesQuestions?.[qId] || {};
     Object.entries(reponsesQ).forEach(([uid, rep]) => {
-      if (scores[uid] && rep === q.reponseCorrecte) scores[uid].pts += 5;
+      if (scores[uid] && rep === q.reponseCorrecte) { scores[uid].pts += 5; scores[uid].qpts += 5; }
     });
   });
 
@@ -1277,7 +1325,7 @@ function renderClassement() {
   const podium = document.getElementById('podium-zone');
   const tbody = document.getElementById('classement-body');
   const thead = document.querySelector('.classement-table thead tr');
-  thead.innerHTML = '<th>#</th><th>Joueur</th><th>Pts</th><th>Exacts</th><th>Issues</th><th>🗡️ Volés</th><th>💀 Perdus</th>';
+  thead.innerHTML = '<th>#</th><th>Joueur</th><th>Pts</th><th>✓</th><th>~</th><th>❓</th><th>🗡️</th><th>💀</th>';
   if (!sorted.length) {
     podium.innerHTML = '';
     tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><span>🏆</span>Personne n\'a encore de points</div></td></tr>';
@@ -1299,6 +1347,7 @@ function renderClassement() {
       <td class="pts-badge">${s.pts}</td>
       <td style="color:var(--vert-clair);font-weight:600">${s.exacts}</td>
       <td style="color:var(--texte-gris)">${s.issues}</td>
+      <td style="color:#9b59b6;font-weight:600">${s.qpts > 0 ? '+' + s.qpts : '-'}</td>
       <td style="color:var(--or)">${s.voles > 0 ? '+' + s.voles : '-'}</td>
       <td style="color:var(--rouge)">${s.vole > 0 ? '-' + s.vole : '-'}</td>
     </tr>`).join('');
@@ -1308,7 +1357,7 @@ function renderClassement() {
 // ---- ARCHIVES PAR JOURNÉE ----
 function calculerPointsWeekend(weekend) {
   const scores = {};
-  Object.entries(joueursMap).forEach(([uid, j]) => scores[uid] = { pseudo: j.pseudo, pts: 0, exacts: 0, issues: 0, voles: 0, vole: 0 });
+  Object.entries(joueursMap).forEach(([uid, j]) => scores[uid] = { pseudo: j.pseudo, pts: 0, exacts: 0, issues: 0, voles: 0, vole: 0, qpts: 0 });
   const matchsW = matchs.filter(m => m.weekend === weekend && m.scoreDom !== null && m.scoreDom !== undefined);
 
   matchsW.forEach(m => {
@@ -1331,7 +1380,7 @@ function calculerPointsWeekend(weekend) {
     if (q.reponseCorrecte === null || q.reponseCorrecte === undefined) return;
     const reponsesQ = window._reponsesQuestions?.[qId] || {};
     Object.entries(reponsesQ).forEach(([uid, rep]) => {
-      if (scores[uid] && rep === q.reponseCorrecte) scores[uid].pts += 5;
+      if (scores[uid] && rep === q.reponseCorrecte) { scores[uid].pts += 5; scores[uid].qpts += 5; }
     });
   });
 
@@ -1549,6 +1598,57 @@ function renderChat() {
 window.supprimerMessage = async function(key) {
   if (!confirm('Supprimer ce message ?')) return;
   await remove(ref(db, `chat/${key}`));
+}
+
+// ---- ONGLET QUESTIONS ----
+function renderQuestionsTab() {
+  const el = document.getElementById('questions-tab-liste');
+  const qs = Object.entries(questions);
+  if (!qs.length) { el.innerHTML = '<div class="empty-state"><span>❓</span>Aucune question pour le moment</div>'; return; }
+
+  // Grouper par weekend
+  const weekends = [...new Set(qs.map(([,q]) => q.weekend).filter(Boolean))];
+  el.innerHTML = weekends.map(we => {
+    const qsWE = qs.filter(([,q]) => q.weekend === we);
+    const arcId = `q-arc-${we.replace(/\s/g,'-')}`;
+    const weColor = getWeekendColor(we);
+    const cartes = qsWE.map(([qId, q]) => {
+      const myRep = window._reponsesQuestions?.[qId]?.[currentUser.uid];
+      const fermee = q.reponseCorrecte !== null && q.reponseCorrecte !== undefined;
+      const correct = myRep === q.reponseCorrecte;
+      // Nombre de bonnes réponses
+      const reponsesQ = window._reponsesQuestions?.[qId] || {};
+      const nbBonnes = fermee ? Object.values(reponsesQ).filter(r => r === q.reponseCorrecte).length : null;
+
+      return `
+      <div class="card" style="border-left:3px solid #9b59b6;margin-bottom:10px">
+        <h3 style="color:#c39bd3">${q.question} <span style="font-size:0.72rem;color:var(--texte-gris)">${we} · 5 pts</span></h3>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+          ${q.options.map((opt, i) => {
+            const isCorrect = fermee && i === q.reponseCorrecte;
+            const isMyChoice = myRep === i;
+            const nbRep = Object.values(reponsesQ).filter(r => r === i).length;
+            return `
+            <div style="display:flex;align-items:center;gap:8px;background:${isCorrect ? 'rgba(37,163,85,0.15)' : isMyChoice ? '#2a2a2a' : '#1a1a1a'};border:1px solid ${isCorrect ? 'var(--vert-clair)' : isMyChoice ? '#555' : '#333'};border-radius:8px;padding:8px 12px;font-size:0.83rem">
+              <span style="flex:1">${opt} ${isCorrect ? '✅' : ''} ${isMyChoice && !fermee ? '✓ (ta réponse)' : isMyChoice && fermee ? correct ? '🎯 +5 pts' : '❌' : ''}</span>
+              <span style="color:var(--texte-gris);font-size:0.75rem">${fermee ? nbRep + ' joueur(s)' : ''}</span>
+              ${!fermee && currentUserData.isAdmin ? `<button class="btn btn-ghost" style="font-size:0.68rem;padding:3px 8px" onclick="definirReponse('${qId}',${i})">✓ Bonne rép.</button>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+        ${fermee ? `<div style="margin-top:8px;font-size:0.78rem;color:var(--texte-gris)">${nbBonnes} joueur(s) ont trouvé la bonne réponse</div>` : '<div style="margin-top:6px;font-size:0.75rem;color:var(--texte-gris)">⏳ En attente de la bonne réponse (admin)</div>'}
+      </div>`;
+    }).join('');
+
+    return `
+    <div class="archive-item" style="margin-bottom:10px;border-left:3px solid ${weColor}">
+      <div class="archive-header" onclick="toggleArchive('${arcId}',this)">
+        <span class="archive-titre" style="color:${weColor}">❓ ${we}</span>
+        <span class="archive-chevron">▼</span>
+      </div>
+      <div class="archive-body" id="${arcId}" style="padding:8px 12px 12px">${cartes}</div>
+    </div>`;
+  }).join('');
 }
 
 // ---- JOUEURS ----
