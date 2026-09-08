@@ -743,6 +743,39 @@ window.actualiserManuellement = async function() {
   setTimeout(() => statusEl.textContent = '', 3000);
 }
 
+// Actualise uniquement un match précis depuis l'API
+window.actualiserUnMatch = async function(matchId) {
+  const m = matchs.find(x => x.id === matchId);
+  if (!m || !m.apiId) return toast('Ce match n\'a pas d\'ID API', true);
+  toast('⏳ Actualisation en cours...');
+  try {
+    const comp = m.apiComp || 'FL1';
+    let url;
+    if (m.apiStage) {
+      url = `/.netlify/functions/get-matches?competition=${comp}&stage=${m.apiStage}`;
+    } else if (m.apiJournee) {
+      url = `/.netlify/functions/get-matches?competition=${comp}&matchday=${m.apiJournee}`;
+    } else {
+      const isStage = m.journee && isNaN(Number(m.journee));
+      const STAGE_MAP = { 'Phase de groupes': 'GROUP_STAGE', '32èmes de finale': 'ROUND_OF_32', '16èmes de finale': 'ROUND_OF_16', 'Quarts de finale': 'QUARTER_FINALS', 'Demi-finales': 'SEMI_FINALS', 'Finale': 'FINAL' };
+      url = isStage
+        ? `/.netlify/functions/get-matches?competition=${comp}&stage=${STAGE_MAP[m.journee] || m.journee}`
+        : `/.netlify/functions/get-matches?competition=${comp}&matchday=${m.journee}`;
+    }
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.matchs) return toast('❌ Erreur API', true);
+    const apiMatch = data.matchs.find(x => x.id === m.apiId);
+    if (!apiMatch) return toast('❌ Match non trouvé dans l\'API', true);
+    if (apiMatch.scoreDom === null || apiMatch.scoreDom === undefined) return toast('⏳ Score pas encore disponible', true);
+    await set(ref(db, `matchs/${matchId}/scoreDom`), apiMatch.scoreDom);
+    await set(ref(db, `matchs/${matchId}/scoreExt`), apiMatch.scoreExt);
+    toast(`✅ Score mis à jour : ${apiMatch.scoreDom} - ${apiMatch.scoreExt}`);
+  } catch (e) {
+    toast('❌ Erreur de connexion', true);
+  }
+}
+
 // Actualise automatiquement les scores des matchs déjà importés depuis l'API
 async function actualiserScoresAPI() {
   const matchsApi = matchs.filter(m => m.apiId && (m.scoreDom === null || m.scoreDom === undefined));
@@ -838,7 +871,10 @@ function renderMatchs() {
       if (m.apiId) {
         adminBlock = `
         <div style="font-size:0.76rem;color:var(--vert-clair);margin-top:6px">🌐 Score auto (API) ${hasScore ? '' : '— en attente du match'}</div>
-        <button class="btn btn-rouge" style="margin-top:6px" onclick="supprimerMatch('${m.id}')">✕ Supprimer</button>`;
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <button class="btn btn-ghost" style="font-size:0.75rem;padding:6px 12px" onclick="actualiserUnMatch('${m.id}')">🔄 Actualiser</button>
+          <button class="btn btn-rouge" style="font-size:0.75rem;padding:6px 12px" onclick="supprimerMatch('${m.id}')">✕ Supprimer</button>
+        </div>`;
       } else {
         adminBlock = `
         <div class="score-reel">
@@ -971,19 +1007,19 @@ function getMatchDoubleWeekend(weekend) {
 }
 
 // Stockage attaque : attaques/journee/uid = { matchId, cibleUid }
-window.choisirAttaque = async function(journee, matchId, cibleUid) {
+window.choisirAttaque = async function(weekend, matchId, cibleUid) {
   if (!matchId) return toast('Choisis un match', true);
   if (!cibleUid) return toast('Choisis une cible', true);
   if (cibleUid === currentUser.uid) return toast('Tu ne peux pas t\'attaquer toi-même', true);
   const match = matchs.find(m => m.id === matchId);
   if (!match) return;
-  if (!estVerrouilleH6Journee(match)) return toast('Les pronos ne sont pas encore révélés (avant H-12)', true);
+  if (!estVerrouilleH12Weekend(match)) return toast('Les pronos ne sont pas encore révélés (avant H-12)', true);
   if (estVerrouille(match)) return toast('🔒 Trop tard, le match a commencé', true);
-  // Vérifier max 2 attaquants sur cette cible pour ce match
-  const choixJournee = attaques[journee] || {};
-  const nbFoisCible = Object.entries(choixJournee).filter(([uid, a]) => a?.matchId === matchId && a?.cibleUid === cibleUid && uid !== currentUser.uid).length;
-  if (nbFoisCible >= 2) return toast('Cette cible a déjà 2 attaquants sur ce match', true);
-  await set(ref(db, `attaques/${journee}/${currentUser.uid}`), { matchId, cibleUid });
+  const choixWeekend = attaques[weekend] || {};
+  // Max 2 attaques reçues par cible sur tout le weekend (pas juste sur ce match)
+  const nbFoisCible = Object.entries(choixWeekend).filter(([uid, a]) => a?.cibleUid === cibleUid && uid !== currentUser.uid).length;
+  if (nbFoisCible >= 2) return toast('Cette personne a déjà reçu 2 attaques ce weekend', true);
+  await set(ref(db, `attaques/${weekend}/${currentUser.uid}`), { matchId, cibleUid });
   toast('🗡️ Attaque enregistrée !');
 }
 
@@ -1011,12 +1047,11 @@ function renderAttaque() {
     const matchsEnAttente = matchsWeekend.filter(m => !estVerrouilleH12Weekend(m));
     const fenetreOuverte = matchsOuverts.length > 0;
 
-    // Compte attaques reçues par cible sur chaque match
+    // Compte attaques reçues par cible sur tout le weekend
     const compteurCibles = {};
     Object.entries(choixWeekend).forEach(([uid, a]) => {
-      if (!a?.matchId || uid === currentUser.uid) return;
-      const key = `${a.matchId}_${a.cibleUid}`;
-      compteurCibles[key] = (compteurCibles[key] || 0) + 1;
+      if (!a?.cibleUid || uid === currentUser.uid) return;
+      compteurCibles[a.cibleUid] = (compteurCibles[a.cibleUid] || 0) + 1;
     });
 
     let contenu = '';
@@ -1049,7 +1084,7 @@ function renderAttaque() {
           const hasProno = p?.dom !== undefined && p?.ext !== undefined;
           const hasMonProno = monP?.dom !== undefined && monP?.ext !== undefined;
           const issuesDiff = hasProno && hasMonProno && getIssue(p.dom, p.ext) !== getIssue(monP.dom, monP.ext);
-          const nbAttaques = compteurCibles[`${m.id}_${uid}`] || 0;
+          const nbAttaques = compteurCibles[uid] || 0;
           const dispo = issuesDiff && nbAttaques < 2;
           const isDouble = getMatchDoubleWeekend(weekend) === m.id;
           return `
