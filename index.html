@@ -1720,49 +1720,91 @@ function renderQuestionsTab() {
   const qs = Object.entries(questions);
   if (!qs.length) { el.innerHTML = '<div class="empty-state"><span>❓</span>Aucune question pour le moment</div>'; return; }
 
-  // Grouper par weekend
-  const weekends = [...new Set(qs.map(([,q]) => q.weekend).filter(Boolean))];
-  el.innerHTML = weekends.map(we => {
-    const qsWE = qs.filter(([,q]) => q.weekend === we);
-    const arcId = `q-arc-${we.replace(/\s/g,'-')}`;
-    const weColor = getWeekendColor(we);
-    const cartes = qsWE.map(([qId, q]) => {
-      const myRep = window._reponsesQuestions?.[qId]?.[currentUser.uid];
-      const fermee = q.reponseCorrecte !== null && q.reponseCorrecte !== undefined;
-      const correct = myRep === q.reponseCorrecte;
-      // Nombre de bonnes réponses
-      const reponsesQ = window._reponsesQuestions?.[qId] || {};
-      const nbBonnes = fermee ? Object.values(reponsesQ).filter(r => r === q.reponseCorrecte).length : null;
+  const ouvertes = qs.filter(([,q]) => q.reponseCorrecte === null || q.reponseCorrecte === undefined);
+  const fermees = qs.filter(([,q]) => q.reponseCorrecte !== null && q.reponseCorrecte !== undefined);
 
+  function carteQuestion(qId, q) {
+    const myRep = window._reponsesQuestions?.[qId]?.[currentUser.uid];
+    const fermee = q.reponseCorrecte !== null && q.reponseCorrecte !== undefined;
+    const correct = myRep === q.reponseCorrecte;
+    const reponsesQ = window._reponsesQuestions?.[qId] || {};
+    const nbBonnes = fermee ? Object.values(reponsesQ).filter(r => r === q.reponseCorrecte).length : null;
+    return `
+    <div class="card" style="border-left:3px solid #9b59b6;margin-bottom:10px">
+      <h3 style="color:#c39bd3">${q.question} <span style="font-size:0.72rem;color:var(--texte-gris)">${q.weekend} · 5 pts</span></h3>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+        ${q.options.map((opt, i) => {
+          const isCorrect = fermee && i === q.reponseCorrecte;
+          const isMyChoice = myRep === i;
+          const nbRep = Object.values(reponsesQ).filter(r => r === i).length;
+          return `
+          <div style="display:flex;align-items:center;gap:8px;background:${isCorrect ? 'rgba(37,163,85,0.15)' : isMyChoice ? '#2a2a2a' : '#1a1a1a'};border:1px solid ${isCorrect ? 'var(--vert-clair)' : isMyChoice ? '#555' : '#333'};border-radius:8px;padding:8px 12px;font-size:0.83rem">
+            <span style="flex:1">${opt} ${isCorrect ? '✅' : ''} ${isMyChoice && !fermee ? '✓' : isMyChoice && fermee ? correct ? '🎯 +5 pts' : '❌' : ''}</span>
+            <span style="color:var(--texte-gris);font-size:0.75rem">${fermee ? nbRep + ' joueur(s)' : ''}</span>
+            ${!fermee && currentUserData.isAdmin ? `<button class="btn btn-ghost" style="font-size:0.68rem;padding:3px 8px" onclick="definirReponse('${qId}',${i})">✓ Bonne rép.</button>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+      ${fermee ? `<div style="margin-top:8px;font-size:0.78rem;color:var(--texte-gris)">${nbBonnes} joueur(s) ont trouvé la bonne réponse</div>` : '<div style="margin-top:6px;font-size:0.75rem;color:var(--texte-gris)">⏳ En attente de la bonne réponse (admin)</div>'}
+    </div>`;
+  }
+
+  let html = '';
+
+  // Questions ouvertes → affichées normalement en haut
+  if (ouvertes.length) {
+    html += `<div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:1px;color:#9b59b6;margin-bottom:8px">❓ Questions en cours</div>`;
+    html += ouvertes.map(([qId, q]) => carteQuestion(qId, q)).join('');
+  }
+
+  // Questions fermées → groupées par weekend en accordéon (ordre décroissant)
+  if (fermees.length) {
+    html += `<div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:1px;color:var(--texte-gris);margin:16px 0 8px">📦 Questions passées</div>`;
+    const weekendsDates = {};
+    fermees.forEach(([,q]) => {
+      if (!q.weekend) return;
+      const matchsW = matchs.filter(m => m.weekend === q.weekend);
+      const d = matchsW.length ? Math.max(...matchsW.map(m => new Date(m.heure).getTime())) : 0;
+      if (!weekendsDates[q.weekend] || d > weekendsDates[q.weekend]) weekendsDates[q.weekend] = d;
+    });
+    const weekends = Object.entries(weekendsDates).sort((a,b) => b[1] - a[1]).map(([we]) => we);
+    // Aussi les questions sans weekend
+    const fermeeSansWE = fermees.filter(([,q]) => !q.weekend);
+
+    html += weekends.map(we => {
+      const qsWE = fermees.filter(([,q]) => q.weekend === we);
+      const weColor = getWeekendColor(we);
+      const arcId = `q-arc-${we.replace(/\s/g,'-')}`;
       return `
-      <div class="card" style="border-left:3px solid #9b59b6;margin-bottom:10px">
-        <h3 style="color:#c39bd3">${q.question} <span style="font-size:0.72rem;color:var(--texte-gris)">${we} · 5 pts</span></h3>
-        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
-          ${q.options.map((opt, i) => {
-            const isCorrect = fermee && i === q.reponseCorrecte;
-            const isMyChoice = myRep === i;
-            const nbRep = Object.values(reponsesQ).filter(r => r === i).length;
-            return `
-            <div style="display:flex;align-items:center;gap:8px;background:${isCorrect ? 'rgba(37,163,85,0.15)' : isMyChoice ? '#2a2a2a' : '#1a1a1a'};border:1px solid ${isCorrect ? 'var(--vert-clair)' : isMyChoice ? '#555' : '#333'};border-radius:8px;padding:8px 12px;font-size:0.83rem">
-              <span style="flex:1">${opt} ${isCorrect ? '✅' : ''} ${isMyChoice && !fermee ? '✓ (ta réponse)' : isMyChoice && fermee ? correct ? '🎯 +5 pts' : '❌' : ''}</span>
-              <span style="color:var(--texte-gris);font-size:0.75rem">${fermee ? nbRep + ' joueur(s)' : ''}</span>
-              ${!fermee && currentUserData.isAdmin ? `<button class="btn btn-ghost" style="font-size:0.68rem;padding:3px 8px" onclick="definirReponse('${qId}',${i})">✓ Bonne rép.</button>` : ''}
-            </div>`;
-          }).join('')}
+      <div class="archive-item" style="margin-bottom:8px;border-left:3px solid ${weColor}">
+        <div class="archive-header" onclick="toggleArchive('${arcId}',this)">
+          <span class="archive-titre" style="color:${weColor}">❓ ${we} <span style="font-size:0.75rem;color:var(--texte-gris);font-family:'Inter',sans-serif">(${qsWE.length} question${qsWE.length > 1 ? 's' : ''})</span></span>
+          <span class="archive-chevron">▼</span>
         </div>
-        ${fermee ? `<div style="margin-top:8px;font-size:0.78rem;color:var(--texte-gris)">${nbBonnes} joueur(s) ont trouvé la bonne réponse</div>` : '<div style="margin-top:6px;font-size:0.75rem;color:var(--texte-gris)">⏳ En attente de la bonne réponse (admin)</div>'}
+        <div class="archive-body" id="${arcId}" style="padding:8px 12px 12px">
+          ${qsWE.map(([qId, q]) => carteQuestion(qId, q)).join('')}
+        </div>
       </div>`;
     }).join('');
 
-    return `
-    <div class="archive-item" style="margin-bottom:10px;border-left:3px solid ${weColor}">
-      <div class="archive-header" onclick="toggleArchive('${arcId}',this)">
-        <span class="archive-titre" style="color:${weColor}">❓ ${we}</span>
-        <span class="archive-chevron">▼</span>
-      </div>
-      <div class="archive-body" id="${arcId}" style="padding:8px 12px 12px">${cartes}</div>
-    </div>`;
-  }).join('');
+    if (fermeeSansWE.length) {
+      html += `<div class="archive-item" style="margin-bottom:8px">
+        <div class="archive-header" onclick="toggleArchive('q-arc-sans-we',this)">
+          <span class="archive-titre">❓ Sans weekend</span>
+          <span class="archive-chevron">▼</span>
+        </div>
+        <div class="archive-body" id="q-arc-sans-we" style="padding:8px 12px 12px">
+          ${fermeeSansWE.map(([qId, q]) => carteQuestion(qId, q)).join('')}
+        </div>
+      </div>`;
+    }
+  }
+
+  if (!ouvertes.length && !fermees.length) {
+    html = '<div class="empty-state"><span>❓</span>Aucune question pour le moment</div>';
+  }
+
+  el.innerHTML = html;
 }
 
 // ---- JOUEURS ----
