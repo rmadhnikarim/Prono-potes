@@ -1258,7 +1258,14 @@ function renderMesPronos() {
     const locked = m.weekend ? estVerrouilleH12Weekend(m) : estVerrouilleH6Journee(m);
     return locked;
   });
-  const weekends = [...new Set(passes.filter(m => m.weekend).map(m => m.weekend))];
+  // Weekends triés par date décroissante (plus récent en premier)
+  const weekendsDatesMP = {};
+  passes.forEach(m => {
+    if (!m.weekend) return;
+    const d = new Date(m.heure).getTime();
+    if (!weekendsDatesMP[m.weekend] || d > weekendsDatesMP[m.weekend]) weekendsDatesMP[m.weekend] = d;
+  });
+  const weekends = Object.entries(weekendsDatesMP).sort((a,b) => b[1] - a[1]).map(([we]) => we);
   // Matchs sans weekend → groupés séparément
   const passesSansWE = passes.filter(m => !m.weekend);
 
@@ -1274,7 +1281,7 @@ function renderMesPronos() {
       const myRep = window._reponsesQuestions?.[qId]?.[currentUser.uid];
       html += `
       <div class="card" style="border-left:3px solid #9b59b6">
-        <h3 style="color:#c39bd3">${q.question} <span style="font-size:0.72rem;color:var(--texte-gris)">${q.weekend} · 5 pts</span></h3>
+        <h3 style="color:#c39bd3">${q.question} <span style="font-size:0.72rem;color:var(--texte-gris)">${q.weekend} · 3 pts</span></h3>
         <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
           ${q.options.map((opt, i) => `
           <button onclick="repondreQuestion('${qId}',${i})" style="background:${myRep === i ? 'var(--vert-clair)' : '#1a1a1a'};border:1px solid ${myRep === i ? 'var(--vert-clair)' : '#444'};border-radius:8px;color:#fff;padding:10px 14px;text-align:left;cursor:pointer;font-size:0.85rem">
@@ -1312,7 +1319,7 @@ function renderMesPronos() {
               <h3 style="color:#c39bd3">${q.question}</h3>
               <div style="margin-top:6px;font-size:0.83rem">
                 <div style="color:var(--vert-clair)">✅ Bonne réponse : ${q.options[q.reponseCorrecte]}</div>
-                <div style="color:${correct ? 'var(--vert-clair)' : 'var(--rouge)'}">Ta réponse : ${myRep !== undefined ? q.options[myRep] : '—'} ${correct ? '🎯 +5 pts' : myRep !== undefined ? '❌' : ''}</div>
+                <div style="color:${correct ? 'var(--vert-clair)' : 'var(--rouge)'}">Ta réponse : ${myRep !== undefined ? q.options[myRep] : '—'} ${correct ? '🎯 +3 pts' : myRep !== undefined ? '❌' : ''}</div>
               </div>
             </div>`;
           }).join('')}
@@ -1388,7 +1395,7 @@ function calculerPoints() {
     if (q.reponseCorrecte === null || q.reponseCorrecte === undefined) return;
     const reponsesQ = window._reponsesQuestions?.[qId] || {};
     Object.entries(reponsesQ).forEach(([uid, rep]) => {
-      if (scores[uid] && rep === q.reponseCorrecte) { scores[uid].pts += 5; scores[uid].qpts += 5; }
+      if (scores[uid] && rep === q.reponseCorrecte) { scores[uid].pts += 3; scores[uid].qpts += 3; }
     });
   });
 
@@ -1494,7 +1501,7 @@ function calculerPointsWeekend(weekend) {
     if (q.reponseCorrecte === null || q.reponseCorrecte === undefined) return;
     const reponsesQ = window._reponsesQuestions?.[qId] || {};
     Object.entries(reponsesQ).forEach(([uid, rep]) => {
-      if (scores[uid] && rep === q.reponseCorrecte) { scores[uid].pts += 5; scores[uid].qpts += 5; }
+      if (scores[uid] && rep === q.reponseCorrecte) { scores[uid].pts += 3; scores[uid].qpts += 3; }
     });
   });
 
@@ -1608,6 +1615,14 @@ window.definirReponse = async function(qId, idx) {
   toast('✅ Bonne réponse enregistrée !');
 }
 
+window.supprimerQuestion = async function(qId) {
+  if (!currentUserData.isAdmin) return;
+  if (!confirm('Supprimer cette question ?')) return;
+  await remove(ref(db, `questions/${qId}`));
+  await remove(ref(db, `reponsesQuestions/${qId}`));
+  toast('🗑️ Question supprimée');
+}
+
 window.repondreQuestion = async function(qId, idx) {
   const q = questions[qId];
   if (!q) return;
@@ -1636,7 +1651,7 @@ function renderQuestions(el) {
     div.innerHTML = `
       <div class="match-header">
         <span class="match-equipes" style="font-size:0.95rem">❓ ${q.question}</span>
-        <span class="match-comp">${q.weekend} · 5 pts</span>
+        <span class="match-comp">${q.weekend} · 3 pts</span>
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
         ${q.options.map((opt, i) => {
@@ -1729,9 +1744,13 @@ function renderQuestionsTab() {
     const correct = myRep === q.reponseCorrecte;
     const reponsesQ = window._reponsesQuestions?.[qId] || {};
     const nbBonnes = fermee ? Object.values(reponsesQ).filter(r => r === q.reponseCorrecte).length : null;
+    const weColor = getWeekendColor(q.weekend || '');
     return `
-    <div class="card" style="border-left:3px solid #9b59b6;margin-bottom:10px">
-      <h3 style="color:#c39bd3">${q.question} <span style="font-size:0.72rem;color:var(--texte-gris)">${q.weekend} · 5 pts</span></h3>
+    <div class="card" style="border-left:3px solid ${weColor};margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <h3 style="color:${weColor};margin-bottom:0">${q.question} <span style="font-size:0.72rem;color:var(--texte-gris)">${q.weekend || ''} · 3 pts</span></h3>
+        ${currentUserData.isAdmin ? `<button onclick="supprimerQuestion('${qId}')" style="background:none;border:none;color:var(--rouge);cursor:pointer;font-size:1.1rem;padding:0;line-height:1;flex-shrink:0">✕</button>` : ''}
+      </div>
       <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
         ${q.options.map((opt, i) => {
           const isCorrect = fermee && i === q.reponseCorrecte;
@@ -1739,7 +1758,7 @@ function renderQuestionsTab() {
           const nbRep = Object.values(reponsesQ).filter(r => r === i).length;
           return `
           <div style="display:flex;align-items:center;gap:8px;background:${isCorrect ? 'rgba(37,163,85,0.15)' : isMyChoice ? '#2a2a2a' : '#1a1a1a'};border:1px solid ${isCorrect ? 'var(--vert-clair)' : isMyChoice ? '#555' : '#333'};border-radius:8px;padding:8px 12px;font-size:0.83rem">
-            <span style="flex:1">${opt} ${isCorrect ? '✅' : ''} ${isMyChoice && !fermee ? '✓' : isMyChoice && fermee ? correct ? '🎯 +5 pts' : '❌' : ''}</span>
+            <span style="flex:1">${opt} ${isCorrect ? '✅' : ''} ${isMyChoice && !fermee ? '✓' : isMyChoice && fermee ? correct ? '🎯 +3 pts' : '❌' : ''}</span>
             <span style="color:var(--texte-gris);font-size:0.75rem">${fermee ? nbRep + ' joueur(s)' : ''}</span>
             ${!fermee && currentUserData.isAdmin ? `<button class="btn btn-ghost" style="font-size:0.68rem;padding:3px 8px" onclick="definirReponse('${qId}',${i})">✓ Bonne rép.</button>` : ''}
           </div>`;
@@ -1835,47 +1854,56 @@ window.afficherPronosJoueur = function() {
   const detail = document.getElementById('joueur-pronos-detail');
   if (!uid) { detail.innerHTML = ''; return; }
 
-  const pseudo = joueursMap[uid]?.pseudo || '?';
+  // Weekends triés par date décroissante
+  const weekendsDatesJ = {};
+  matchs.forEach(m => {
+    if (!m.weekend) return;
+    const d = new Date(m.heure).getTime();
+    if (!weekendsDatesJ[m.weekend] || d > weekendsDatesJ[m.weekend]) weekendsDatesJ[m.weekend] = d;
+  });
+  const weekends = Object.entries(weekendsDatesJ).sort((a,b) => b[1] - a[1]).map(([we]) => we);
 
-  // Journées disponibles
-  const journees = [...new Set(matchs.filter(m => m.journee).map(m => m.journee))];
-  if (!journees.length) { detail.innerHTML = '<div style="color:var(--texte-gris);font-size:0.85rem">Aucune journée disponible</div>'; return; }
+  if (!weekends.length) { detail.innerHTML = '<div style="color:var(--texte-gris);font-size:0.85rem">Aucun weekend disponible</div>'; return; }
 
-  detail.innerHTML = journees.map(journee => {
-    const matchsJ = matchs.filter(m => m.journee === journee);
-    const verrou = matchsJ.some(m => estVerrouilleH6Journee(m));
+  detail.innerHTML = weekends.map(we => {
+    const matchsW = matchs.filter(m => m.weekend === we).sort((a,b) => new Date(a.heure) - new Date(b.heure));
+    const verrou = matchsW.some(m => estVerrouilleH12Weekend(m));
+    const weColor = getWeekendColor(we);
 
     if (!verrou) {
       return `
-      <div class="archive-item" style="margin-bottom:8px">
+      <div class="archive-item" style="margin-bottom:8px;border-left:3px solid ${weColor}">
         <div style="padding:12px 16px;color:var(--texte-gris);font-size:0.83rem">
-          📅 <strong style="color:var(--blanc)">Journée ${journee}</strong> — 🔒 Pronos masqués (avant H-4)
+          🗓️ <strong style="color:${weColor}">${we}</strong> — 🔒 Pronos masqués (avant H-12)
         </div>
       </div>`;
     }
 
-    const lignes = matchsJ.map(m => {
+    const lignes = matchsW.map(m => {
       const p = pronos[m.id]?.[uid];
       const hasScore = m.scoreDom !== null && m.scoreDom !== undefined;
+      const isDouble = getMatchDoubleWeekend(we) === m.id;
+      const monCoeur = coeurs[we]?.[uid] === m.id;
       let badge = '';
       if (hasScore && p?.dom !== undefined && p?.ext !== undefined) {
-        if (p.dom === m.scoreDom && p.ext === m.scoreExt) badge = '<span style="color:var(--vert-clair);font-weight:700">🎯 +3</span>';
-        else if (getIssue(p.dom, p.ext) === getIssue(m.scoreDom, m.scoreExt)) badge = '<span style="color:#aaa">✅ +1</span>';
+        const mult = (isDouble ? 2 : 1) * (monCoeur ? 2 : 1);
+        if (p.dom === m.scoreDom && p.ext === m.scoreExt) badge = `<span style="color:var(--vert-clair);font-weight:700">🎯 +${3*mult}</span>`;
+        else if (getIssue(p.dom, p.ext) === getIssue(m.scoreDom, m.scoreExt)) badge = `<span style="color:#aaa">✅ +${1*mult}</span>`;
         else badge = '<span style="color:#555">❌ 0</span>';
       }
       return `
       <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:#1a1a1a;border-radius:7px;margin-top:5px;font-size:0.82rem">
-        <span style="flex:1">${m.dom} vs ${m.ext}</span>
+        <span style="flex:1">${m.dom} vs ${m.ext} ${isDouble ? '<span class="double-badge">x2</span>' : ''} ${monCoeur ? '❤️' : ''}</span>
         <span style="font-weight:700;color:var(--or)">${p?.dom !== undefined ? p.dom + ' - ' + p.ext : '<span style="color:var(--texte-gris)">—</span>'}</span>
         ${badge}
       </div>`;
     }).join('');
 
-    const arcId = `jp-${journee.replace(/\s/g,'-')}`;
+    const arcId = `jp-${we.replace(/\s/g,'-')}`;
     return `
-    <div class="archive-item" style="margin-bottom:8px">
+    <div class="archive-item" style="margin-bottom:8px;border-left:3px solid ${weColor}">
       <div class="archive-header" onclick="toggleArchive('${arcId}', this)">
-        <span class="archive-titre">📅 Journée ${journee}</span>
+        <span class="archive-titre" style="color:${weColor}">🗓️ ${we}</span>
         <span class="archive-chevron">▼</span>
       </div>
       <div class="archive-body" id="${arcId}" style="padding:8px 12px 12px">
