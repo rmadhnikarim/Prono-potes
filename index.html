@@ -1537,7 +1537,16 @@ function calculerPointsWeekend(weekend) {
 
 function renderArchives() {
   const el = document.getElementById('archives-liste');
-  const weekends = getWeekends();
+
+  // Weekends triés par date décroissante (plus récent en premier)
+  const weekendsDatesA = {};
+  matchs.forEach(m => {
+    if (!m.weekend) return;
+    const d = new Date(m.heure).getTime();
+    if (!weekendsDatesA[m.weekend] || d > weekendsDatesA[m.weekend]) weekendsDatesA[m.weekend] = d;
+  });
+  const weekends = Object.entries(weekendsDatesA).sort((a,b) => b[1] - a[1]).map(([we]) => we);
+
   if (!weekends.length) { el.innerHTML = '<div class="empty-state"><span>📅</span>Aucun weekend disponible</div>'; return; }
 
   el.innerHTML = weekends.map(we => {
@@ -1546,7 +1555,19 @@ function renderArchives() {
     const termines = matchsW.filter(m => m.scoreDom !== null && m.scoreDom !== undefined).length;
     const matchDouble = getMatchDoubleWeekend(we);
     const matchDoubleNom = matchDouble ? matchsW.find(m => m.id === matchDouble) : null;
-    const rows = sorted.map((s, i) => `
+    const weColor = getWeekendColor(we);
+
+    // Uniquement les joueurs qui ont pronostiqué au moins un match de ce weekend
+    const joueursAvecPronos = sorted.filter(s => {
+      const uid = Object.entries(joueursMap).find(([,j]) => j.pseudo === s.pseudo)?.[0];
+      if (!uid) return false;
+      return matchsW.some(m => {
+        const p = pronos[m.id]?.[uid];
+        return p?.dom !== undefined && p?.ext !== undefined;
+      });
+    });
+
+    const rows = joueursAvecPronos.map((s, i) => `
       <tr>
         <td class="rang">${i+1}</td>
         <td>${s.pseudo}</td>
@@ -1558,11 +1579,11 @@ function renderArchives() {
       </tr>`).join('');
 
     return `
-    <div class="archive-item">
+    <div class="archive-item" style="border-left:3px solid ${weColor}">
       <div class="archive-header" onclick="toggleArchive('arc-${we.replace(/\s/g,'-')}', this)">
         <div>
-          <span class="archive-titre">🗓️ ${we}</span>
-          <span style="font-size:0.72rem;color:var(--texte-gris);margin-left:8px">${termines}/${matchsW.length} matchs terminés${matchDoubleNom ? ' · 🎲 ' + matchDoubleNom.dom + ' vs ' + matchDoubleNom.ext : ''}</span>
+          <span class="archive-titre" style="color:${weColor}">🗓️ ${we}</span>
+          <span style="font-size:0.72rem;color:var(--texte-gris);margin-left:8px">${termines}/${matchsW.length} matchs · ${joueursAvecPronos.length} joueur(s)${matchDoubleNom ? ' · 🎲 ' + matchDoubleNom.dom + ' vs ' + matchDoubleNom.ext : ''}</span>
         </div>
         <span class="archive-chevron">▼</span>
       </div>
@@ -1570,7 +1591,7 @@ function renderArchives() {
         ${rows ? `<table class="classement-table" style="margin-top:4px">
           <thead><tr><th>#</th><th>Joueur</th><th>Pts</th><th>✓</th><th>~</th><th>🗡️</th><th>💀</th></tr></thead>
           <tbody>${rows}</tbody>
-        </table>` : '<div style="color:var(--texte-gris);font-size:0.82rem;padding:8px">Aucun point marqué pour l\'instant</div>'}
+        </table>` : '<div style="color:var(--texte-gris);font-size:0.82rem;padding:8px">Aucun prono pour ce weekend</div>'}
       </div>
     </div>`;
   }).join('');
