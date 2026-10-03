@@ -993,6 +993,15 @@ window.savMonProno = async function(matchId, side, val) {
 
 function getIssue(d, e) { return d > e ? 1 : d < e ? -1 : 0; }
 
+function getRankEmoji(i, total) {
+  if (i === 0) return '👑';
+  if (i === 1) return '🥈';
+  if (i === 2) return '🥉';
+  if (i === total - 2 && total > 4) return '🐐';
+  if (i === total - 1 && total > 3) return '🍆';
+  return '';
+}
+
 // Palette de couleurs par weekend
 const WEEKEND_COLORS = ['#e74c3c','#3498db','#9b59b6','#e67e22','#1abc9c','#e91e8c','#00bcd4','#ff5722','#8bc34a','#ffc107','#673ab7','#009688'];
 function getWeekendColor(weekend) {
@@ -1461,17 +1470,20 @@ function renderClassement() {
       </div>`).join('')}
     </div>`;
   } else { podium.innerHTML = ''; }
-  tbody.innerHTML = sorted.map((s,i) => `
+  tbody.innerHTML = sorted.map((s,i) => {
+    const emoji = getRankEmoji(i, sorted.length);
+    return `
     <tr>
       <td class="rang">${i+1}</td>
-      <td>${s.pseudo}</td>
+      <td>${emoji ? emoji + ' ' : ''}${s.pseudo}</td>
       <td class="pts-badge">${s.pts}</td>
       <td style="color:var(--vert-clair);font-weight:600">${s.exacts}</td>
       <td style="color:var(--texte-gris)">${s.issues}</td>
       <td style="color:#9b59b6;font-weight:600">${s.qpts > 0 ? '+' + s.qpts : '-'}</td>
       <td style="color:var(--or)">${s.voles > 0 ? '+' + s.voles : '-'}</td>
       <td style="color:var(--rouge)">${s.vole > 0 ? '-' + s.vole : '-'}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   renderArchives();
 }
 
@@ -1567,16 +1579,19 @@ function renderArchives() {
       });
     });
 
-    const rows = joueursAvecPronos.map((s, i) => `
+    const rows = joueursAvecPronos.map((s, i) => {
+      const emoji = getRankEmoji(i, joueursAvecPronos.length);
+      return `
       <tr>
         <td class="rang">${i+1}</td>
-        <td>${s.pseudo}</td>
+        <td>${emoji ? emoji + ' ' : ''}${s.pseudo}</td>
         <td class="pts-badge">${s.pts}</td>
         <td style="color:var(--vert-clair)">${s.exacts}</td>
         <td style="color:var(--texte-gris)">${s.issues}</td>
         <td style="color:var(--or)">${s.voles > 0 ? '+'+s.voles : '-'}</td>
         <td style="color:var(--rouge)">${s.vole > 0 ? '-'+s.vole : '-'}</td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
 
     return `
     <div class="archive-item" style="border-left:3px solid ${weColor}">
@@ -1663,32 +1678,76 @@ window.repondreQuestion = async function(qId, idx) {
 function renderQuestions(el) {
   const qs = Object.entries(questions);
   if (!qs.length) return;
-  qs.forEach(([qId, q]) => {
+
+  const ouvertes = qs.filter(([,q]) => q.reponseCorrecte === null || q.reponseCorrecte === undefined);
+  const fermees = qs.filter(([,q]) => q.reponseCorrecte !== null && q.reponseCorrecte !== undefined);
+
+  // Questions ouvertes → affichées normalement
+  ouvertes.forEach(([qId, q]) => {
     const myReponse = window._reponsesQuestions?.[qId]?.[currentUser.uid];
-    const locked = q.reponseCorrecte !== null && q.reponseCorrecte !== undefined;
+    const weColor = getWeekendColor(q.weekend || '');
     const div = document.createElement('div');
     div.className = 'match-card';
-    div.style.borderLeftColor = '#9b59b6';
+    div.style.borderLeftColor = weColor;
     div.innerHTML = `
       <div class="match-header">
-        <span class="match-equipes" style="font-size:0.95rem">❓ ${q.question}</span>
-        <span class="match-comp">${q.weekend} · 3 pts</span>
+        <span class="match-equipes" style="font-size:0.95rem;color:${weColor}">❓ ${q.question}</span>
+        <span class="match-comp">${q.weekend || ''} · 3 pts</span>
+        ${currentUserData.isAdmin ? `<button onclick="supprimerQuestion('${qId}')" style="background:none;border:none;color:var(--rouge);cursor:pointer;font-size:1rem;padding:0">✕</button>` : ''}
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
         ${q.options.map((opt, i) => {
-          const isCorrect = locked && i === q.reponseCorrecte;
           const isMyChoice = myReponse === i;
-          const bg = isCorrect ? 'var(--vert-clair)' : isMyChoice ? '#444' : '#1a1a1a';
           return `
           <div style="display:flex;gap:8px;align-items:center">
-            ${!locked ? `<button onclick="repondreQuestion('${qId}',${i})" style="flex:1;background:${bg};border:1px solid #444;border-radius:8px;color:#fff;padding:8px 12px;text-align:left;cursor:pointer;font-size:0.83rem">${opt} ${isMyChoice ? '✓' : ''}</button>` :
-            `<div style="flex:1;background:${bg};border-radius:8px;padding:8px 12px;font-size:0.83rem;color:#fff">${opt} ${isCorrect ? '✅' : ''} ${isMyChoice && isCorrect ? '+5 🎯' : isMyChoice && !isCorrect ? '❌' : ''}</div>`}
-            ${currentUserData.isAdmin && !locked ? `<button class="btn btn-ghost" style="font-size:0.7rem;padding:4px 8px" onclick="definirReponse('${qId}',${i})">✓ Bonne rép.</button>` : ''}
+            <button onclick="repondreQuestion('${qId}',${i})" style="flex:1;background:${isMyChoice ? weColor : '#1a1a1a'};border:1px solid ${isMyChoice ? weColor : '#444'};border-radius:8px;color:#fff;padding:8px 12px;text-align:left;cursor:pointer;font-size:0.83rem">${opt} ${isMyChoice ? '✓' : ''}</button>
+            ${currentUserData.isAdmin ? `<button class="btn btn-ghost" style="font-size:0.7rem;padding:4px 8px" onclick="definirReponse('${qId}',${i})">✓ Bonne rép.</button>` : ''}
           </div>`;
         }).join('')}
       </div>`;
     el.appendChild(div);
   });
+
+  // Questions fermées → un seul accordéon "Questions passées"
+  if (fermees.length) {
+    const arcId = 'q-matchs-passees';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'archive-item';
+    wrapper.style.marginTop = '12px';
+    wrapper.innerHTML = `
+      <div class="archive-header" onclick="toggleArchive('${arcId}', this)">
+        <span class="archive-titre">📦 Questions passées <span style="font-size:0.75rem;color:var(--texte-gris);font-family:'Inter',sans-serif">(${fermees.length})</span></span>
+        <span class="archive-chevron">▼</span>
+      </div>
+      <div class="archive-body" id="${arcId}" style="padding:8px 12px 12px">
+        ${fermees.map(([qId, q]) => {
+          const myReponse = window._reponsesQuestions?.[qId]?.[currentUser.uid];
+          const weColor = getWeekendColor(q.weekend || '');
+          const correct = myReponse === q.reponseCorrecte;
+          return `
+          <div class="match-card" style="border-left-color:${weColor};margin-bottom:8px">
+            <div class="match-header">
+              <span class="match-equipes" style="font-size:0.9rem;color:${weColor}">❓ ${q.question}</span>
+              <span class="match-comp">${q.weekend || ''} · 3 pts</span>
+              ${currentUserData.isAdmin ? `<button onclick="supprimerQuestion('${qId}')" style="background:none;border:none;color:var(--rouge);cursor:pointer;font-size:1rem;padding:0">✕</button>` : ''}
+            </div>
+            <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+              ${q.options.map((opt, i) => {
+                const isCorrect = i === q.reponseCorrecte;
+                const isMyChoice = myReponse === i;
+                return `<div style="background:${isCorrect ? 'rgba(37,163,85,0.15)' : '#1a1a1a'};border:1px solid ${isCorrect ? 'var(--vert-clair)' : '#333'};border-radius:8px;padding:7px 12px;font-size:0.82rem;color:#fff">
+                  ${opt} ${isCorrect ? '✅' : ''} ${isMyChoice && isCorrect ? '🎯 +3 pts' : isMyChoice && !isCorrect ? '❌' : ''}
+                </div>`;
+              }).join('')}
+            </div>
+            <div style="margin-top:6px;font-size:0.78rem;color:${correct ? 'var(--vert-clair)' : myReponse !== undefined ? 'var(--rouge)' : 'var(--texte-gris)'}">
+              ${myReponse !== undefined ? (correct ? '✅ Bonne réponse !' : '❌ Mauvaise réponse') : '— Pas de réponse'}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    el.appendChild(wrapper);
+  }
 }
 
 // ---- CŒUR x2 ----
