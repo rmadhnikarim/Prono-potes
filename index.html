@@ -125,6 +125,8 @@ function verifierNotificationsH24() {
   .coeur-btn { background: none; border: none; font-size: 1.4rem; cursor: pointer; padding: 0; line-height: 1; transition: transform 0.2s; }
   .coeur-btn:hover { transform: scale(1.2); }
   .double-badge { background: linear-gradient(135deg, #f0b429, #e03434); color: #fff; font-size: 0.7rem; padding: 2px 7px; border-radius: 6px; font-weight: 700; }
+  .star-badge { background: linear-gradient(135deg, #fff176, #ffd600); color: #000; font-size: 0.7rem; padding: 2px 7px; border-radius: 6px; font-weight: 700; }
+  .star-banner { background: linear-gradient(135deg, #fff176 0%, #ffd600 100%); color: #000; font-size: 0.78rem; font-weight: 700; padding: 5px 10px; border-radius: 6px; margin-bottom: 6px; text-align: center; }
   .match-double-banner { background: linear-gradient(135deg, #f0b429 0%, #c87800 100%); color: #000; font-size: 0.78rem; font-weight: 700; padding: 5px 10px; border-radius: 6px; margin-bottom: 6px; text-align: center; }
   .weekend-tag { font-size: 0.68rem; padding: 2px 7px; border-radius: 10px; font-weight: 700; }
 
@@ -410,6 +412,7 @@ let questions = {};
 let coeurs = {}; // { journee: { uid: matchId } }
 let chatMessages = [];
 let matchsDoubles = {}; // { journee: matchId } — stocké dans Firebase
+let matchsStar = {}; // { weekend: matchId } — match star choisi par l'admin
 let activeTab = 'matchs';
 let authMode = 'login';
 
@@ -535,6 +538,10 @@ function ecouterDonnees() {
   });
   onValue(ref(db, 'coeurs'), (snap) => {
     coeurs = snap.val() || {};
+    renderCurrent();
+  });
+  onValue(ref(db, 'matchsStar'), (snap) => {
+    matchsStar = snap.val() || {};
     renderCurrent();
   });
   onValue(ref(db, 'matchsDoubles'), (snap) => {
@@ -868,10 +875,13 @@ function renderMatchs() {
     const hasScore = m.scoreDom !== null && m.scoreDom !== undefined;
     let adminBlock = '';
     if (currentUserData.isAdmin) {
+      const isStar = m.weekend && getMatchStarWeekend(m.weekend) === m.id;
+      const starBtn = m.weekend ? `<button class="btn ${isStar ? 'btn-or' : 'btn-ghost'}" style="font-size:0.75rem;padding:6px 12px" onclick="toggleMatchStar('${m.weekend}','${m.id}')">${isStar ? '⭐ Star' : '☆ Star'}</button>` : '';
       if (m.apiId) {
         adminBlock = `
         <div style="font-size:0.76rem;color:var(--vert-clair);margin-top:6px">🌐 Score auto (API) ${hasScore ? '' : '— en attente du match'}</div>
         <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+          ${starBtn}
           <button class="btn btn-ghost" style="font-size:0.75rem;padding:6px 12px" onclick="actualiserUnMatch('${m.id}')">🔄 Actualiser</button>
           <button class="btn btn-rouge" style="font-size:0.75rem;padding:6px 12px" onclick="supprimerMatch('${m.id}')">✕ Supprimer</button>
         </div>`;
@@ -883,6 +893,7 @@ function renderMatchs() {
           <span style="color:var(--texte-gris)">-</span>
           <input type="number" id="se-${m.id}" min="0" max="20" value="${hasScore ? m.scoreExt : ''}">
           <button class="btn btn-or" style="padding:7px 12px;font-size:0.75rem" onclick="sauvegarderScore('${m.id}')">✓ Sauver</button>
+          ${starBtn}
           <button class="btn btn-rouge" onclick="supprimerMatch('${m.id}')">✕</button>
         </div>`;
       }
@@ -892,6 +903,7 @@ function renderMatchs() {
       <div class="match-header">
         <span class="match-equipes">${m.dom} — ${m.ext}</span>
         <span class="match-comp">${m.comp}${m.journee ? ' · J' + m.journee : ''}</span>
+        ${m.weekend && getMatchStarWeekend(m.weekend) === m.id ? '<span class="star-badge">⭐ Star</span>' : ''}
         ${locked ? '<span class="lock-badge">🔒 Verrouillé</span>' : '<span class="open-badge">🔓 Ouvert</span>'}
       </div>
       <div class="match-heure">🕐 ${formatHeure(m.heure)}</div>
@@ -1044,6 +1056,22 @@ function getMatchDoubleWeekend(weekend) {
   return matchsDoubles[weekend] || null;
 }
 
+function getMatchStarWeekend(weekend) {
+  return matchsStar[weekend] || null;
+}
+
+window.toggleMatchStar = async function(weekend, matchId) {
+  if (!currentUserData.isAdmin) return;
+  const current = matchsStar[weekend];
+  if (current === matchId) {
+    await remove(ref(db, `matchsStar/${weekend}`));
+    toast('⭐ Match star retiré');
+  } else {
+    await set(ref(db, `matchsStar/${weekend}`), matchId);
+    toast('⭐ Match star défini !');
+  }
+}
+
 // Stockage attaque : attaques/journee/uid = { matchId, cibleUid }
 window.choisirAttaque = async function(weekend, matchId, cibleUid) {
   if (!matchId) return toast('Choisis un match', true);
@@ -1193,9 +1221,17 @@ function renderMesPronos() {
     const p = pronos[m.id]?.[currentUser.uid] || {};
     let badge = '';
     if (hasScore && p.dom !== undefined && p.ext !== undefined) {
-      if (p.dom === m.scoreDom && p.ext === m.scoreExt) badge = '<span class="lock-badge" style="background:var(--vert-clair)">+3 🎯 Exact !</span>';
-      else if (getIssue(p.dom, p.ext) === getIssue(m.scoreDom, m.scoreExt)) badge = '<span class="lock-badge" style="background:#555">+1 ✅ Bonne issue</span>';
-      else if (hasScore) badge = '<span class="lock-badge" style="background:#333">0 ❌</span>';
+      const isStar = m.weekend && getMatchStarWeekend(m.weekend) === m.id;
+      const mult = getMultiplier(currentUser.uid, m);
+      if (p.dom === m.scoreDom && p.ext === m.scoreExt) {
+        const pts = (isStar ? 6 : 3) * mult;
+        badge = `<span class="lock-badge" style="background:var(--vert-clair)">+${pts} 🎯 Exact !</span>`;
+      } else if (getIssue(p.dom, p.ext) === getIssue(m.scoreDom, m.scoreExt)) {
+        const pts = (isStar ? 2 : 1) * mult;
+        badge = `<span class="lock-badge" style="background:#555">+${pts} ✅ Bonne issue</span>`;
+      } else if (hasScore) {
+        badge = isStar ? '<span class="lock-badge" style="background:var(--rouge)">-1 ❌</span>' : '<span class="lock-badge" style="background:#333">0 ❌</span>';
+      }
     }
     let statutBadge = '';
     if (lockedH0) statutBadge = '<span class="lock-badge">⚽ En cours / Terminé</span>';
@@ -1232,8 +1268,10 @@ function renderMesPronos() {
     const scoreOptions = ['0','1','2','3','4','5+'].map((v,i) => `<option value="${i === 5 ? 5 : i}" ${p.dom === (i===5?5:i) ? 'selected' : ''}>${v}</option>`).join('');
     const scoreOptionsExt = ['0','1','2','3','4','5+'].map((v,i) => `<option value="${i === 5 ? 5 : i}" ${p.ext === (i===5?5:i) ? 'selected' : ''}>${v}</option>`).join('');
 
+    const isStarM = m.weekend && getMatchStarWeekend(m.weekend) === m.id;
     return `
-    <div class="card" style="border-left:4px solid ${weColor}">
+    <div class="card" style="border-left:4px solid ${isStarM ? '#ffd600' : weColor}">
+      ${isStarM ? '<div class="star-banner">⭐ MATCH STAR — Exact +6pts · Issue +2pts · Raté -1pt</div>' : ''}
       ${m.weekend && getMatchDoubleWeekend(m.weekend) === m.id ? '<div class="match-double-banner">🎲 MATCH DOUBLE — Points x2 !</div>' : ''}
       <h3>${m.dom} vs ${m.ext} <span style="font-size:0.72rem;color:var(--texte-gris)">${m.comp}</span> ${m.weekend ? `<span class="weekend-tag" style="background:${weColor}33;color:${weColor}">${m.weekend}</span>` : ''}</h3>
       <div class="match-heure">🕐 ${formatHeure(m.heure)} ${statutBadge}</div>
@@ -1369,16 +1407,17 @@ function getPtsMatch(uid, m) {
   if (!p || p.dom === undefined || p.ext === undefined) return 0;
   if (m.scoreDom === null || m.scoreDom === undefined) return 0;
   const issueReel = getIssue(m.scoreDom, m.scoreExt);
-  if (p.dom === m.scoreDom && p.ext === m.scoreExt) return 3;
-  if (getIssue(p.dom, p.ext) === issueReel) return 1;
-  return 0;
+  const isStar = m.weekend && getMatchStarWeekend(m.weekend) === m.id;
+  if (p.dom === m.scoreDom && p.ext === m.scoreExt) return isStar ? 6 : 3; // exact
+  if (getIssue(p.dom, p.ext) === issueReel) return isStar ? 2 : 1; // bonne issue
+  return isStar ? -1 : 0; // mauvais résultat → malus si star
 }
 
 function getMultiplier(uid, m) {
   const we = m.weekend;
   let mult = 1;
-  if (we && getMatchDoubleWeekend(we) === m.id) mult *= 2; // match tiré au sort x2
-  if (we && coeurs[we]?.[uid] === m.id) mult *= 2; // cœur x2
+  if (we && getMatchDoubleWeekend(we) === m.id) mult *= 2;
+  if (we && coeurs[we]?.[uid] === m.id) mult *= 2;
   return mult;
 }
 
