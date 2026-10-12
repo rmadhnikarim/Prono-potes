@@ -1538,9 +1538,10 @@ function calculerPointsWeekend(weekend) {
       const p = pronos[m.id]?.[uid];
       if (!p || p.dom === undefined || p.ext === undefined) return;
       if (!scores[uid]) return;
-      const pts = p.dom === m.scoreDom && p.ext === m.scoreExt ? 3 : getIssue(p.dom, p.ext) === issueReel ? 1 : 0;
-      if (pts === 3) scores[uid].exacts++;
-      else if (pts === 1) scores[uid].issues++;
+      const pts = getPtsMatch(uid, m); // utilise getPtsMatch qui gère le star
+      const ptsBase = p.dom === m.scoreDom && p.ext === m.scoreExt ? (getMatchStarWeekend(m.weekend) === m.id ? 6 : 3) : getIssue(p.dom, p.ext) === issueReel ? (getMatchStarWeekend(m.weekend) === m.id ? 2 : 1) : 0;
+      if (ptsBase === 6 || ptsBase === 3) scores[uid].exacts++;
+      else if (ptsBase === 2 || ptsBase === 1) scores[uid].issues++;
       const mult = getMultiplier(uid, m);
       scores[uid].pts += pts * mult;
     });
