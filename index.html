@@ -33,10 +33,10 @@ function verifierNotificationsH24() {
 
   weekends.forEach(we => {
     const heureH24 = new Date(we.premierMatch - 24 * 60 * 60 * 1000);
-    const heureH12 = new Date(we.premierMatch - 12 * 60 * 60 * 1000);
+    const heureH12 = new Date(we.premierMatch - 4 * 60 * 60 * 1000);
     const dejaNotiفié = localStorage.getItem(`notif_${we.id}`);
 
-    // Si on est entre H-24 et H-12 et pas encore notifié
+    // Si on est entre H-24 et H-4 et pas encore notifié
     if (now >= heureH24 && now < heureH12 && !dejaNotiفié) {
       new Notification('⚽ Pronos entre potes', {
         body: `N'oublie pas tes pronos du ${we.id} ! Clôture dans moins de 24h 🔒`,
@@ -547,7 +547,7 @@ function ecouterDonnees() {
   onValue(ref(db, 'matchsDoubles'), (snap) => {
     matchsDoubles = snap.val() || {};
     renderCurrent();
-    // Admin déclenche le tirage si pas encore fait pour les journées H-12
+    // Admin déclenche le tirage si pas encore fait pour les journées H-4
     if (currentUserData.isAdmin) tirerAuSortMatchsDoubles();
   });
   onValue(ref(db, 'reponsesQuestions'), (snap) => {
@@ -592,15 +592,15 @@ function estVerrouille(match) {
   return new Date() >= new Date(match.heure);
 }
 
-// Retourne l'heure H-12 du premier match d'une journée
+// Retourne l'heure H-4 du premier match d'une journée
 function getHeureVerrouilJournee(journee) {
   const matchsJ = matchs.filter(m => m.journee === journee && m.heure);
   if (!matchsJ.length) return null;
   const premier = matchsJ.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsJ[0]);
-  return new Date(new Date(premier.heure).getTime() - 12 * 60 * 60 * 1000);
+  return new Date(new Date(premier.heure).getTime() - 4 * 60 * 60 * 1000);
 }
 
-// H-12 du 1er match de la journée → pronos verrouillés + visibles
+// H-4 du 1er match de la journée → pronos verrouillés + visibles
 function estVerrouilleH6Journee(match) {
   if (!match.journee) return estVerrouille(match);
   const heureVerrou = getHeureVerrouilJournee(match.journee);
@@ -619,13 +619,13 @@ function getMatchDouble(journee) {
   return matchsDoubles[journee] || null;
 }
 
-// Tirage automatique pour les journées passées H-12 sans match double encore tiré (admin seulement)
+// Tirage automatique pour les journées passées H-4 sans match double encore tiré (admin seulement)
 async function tirerAuSortMatchsDoubles() {
   const weekends = getWeekends();
   for (const weekend of weekends) {
     if (matchsDoubles[weekend]) continue; // déjà tiré
     const heureVerrou = getHeureVerrouilWeekend(weekend);
-    if (!heureVerrou || new Date() < heureVerrou) continue; // pas encore H-12
+    if (!heureVerrou || new Date() < heureVerrou) continue; // pas encore H-4
     const matchsW = getMatchsWeekend(weekend);
     if (!matchsW.length) continue;
     const idx = Math.floor(Math.random() * matchsW.length);
@@ -876,7 +876,7 @@ function renderMatchs() {
     let adminBlock = '';
     if (currentUserData.isAdmin) {
       const isStar = m.weekend && getMatchStarWeekend(m.weekend) === m.id;
-      const starBtn = m.weekend ? `<button class="btn ${isStar ? 'btn-or' : 'btn-ghost'}" style="font-size:0.75rem;padding:6px 12px" onclick="toggleMatchStar('${m.weekend}','${m.id}')">${isStar ? '⭐ Star' : '☆ Star'}</button>` : '';
+      const starBtn = m.weekend ? `<button class="btn ${isStar ? 'btn-or' : 'btn-ghost'}" style="font-size:0.75rem;padding:6px 12px" onclick="toggleMatchStar('${jsq(m.weekend)}','${m.id}')">${isStar ? '⭐ Star' : '☆ Star'}</button>` : '';
       if (m.apiId) {
         adminBlock = `
         <div style="font-size:0.76rem;color:var(--vert-clair);margin-top:6px">🌐 Score auto (API) ${hasScore ? '' : '— en attente du match'}</div>
@@ -943,7 +943,7 @@ function renderMatchs() {
     html += weekends.map(we => {
       const matchsW = passes.filter(m => m.weekend === we).sort((a,b) => new Date(a.heure) - new Date(b.heure));
       const weColor = getWeekendColor(we);
-      const arcId = `match-arc-${we.replace(/\s/g,'-')}`;
+      const arcId = `match-arc-${we.replace(/[^A-Za-z0-9_-]/g,'-')}`;
       return `
       <div class="archive-item" style="margin-bottom:8px;border-left:3px solid ${weColor}">
         <div class="archive-header" onclick="toggleArchive('${arcId}', this)">
@@ -988,7 +988,7 @@ function renderMatchs() {
 window.savMonProno = async function(matchId, side, val) {
   const match = matchs.find(m => m.id === matchId);
   const locked = match?.weekend ? estVerrouilleH12Weekend(match) : estVerrouilleH6Journee(match);
-  if (locked) return toast('🔒 Pronos fermés (H-12 atteint)', true);
+  if (locked) return toast('🔒 Pronos fermés (H-4 atteint)', true);
   if (val === '' || val === undefined) return;
   const valInt = parseInt(val); // 5 pour "5+"
   if (isNaN(valInt)) return;
@@ -1002,6 +1002,8 @@ window.savMonProno = async function(matchId, side, val) {
     toast('✅ Prono enregistré');
   }
 }
+
+function jsq(s) { return String(s ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
 
 function getIssue(d, e) { return d > e ? 1 : d < e ? -1 : 0; }
 
@@ -1037,12 +1039,12 @@ function getMatchsWeekend(weekend) {
   return matchs.filter(m => m.weekend === weekend);
 }
 
-// H-12 basé sur le premier match du weekend
+// H-4 basé sur le premier match du weekend
 function getHeureVerrouilWeekend(weekend) {
   const matchsW = getMatchsWeekend(weekend).filter(m => m.heure);
   if (!matchsW.length) return null;
   const premier = matchsW.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsW[0]);
-  return new Date(new Date(premier.heure).getTime() - 12 * 60 * 60 * 1000);
+  return new Date(new Date(premier.heure).getTime() - 4 * 60 * 60 * 1000);
 }
 
 function estVerrouilleH12Weekend(match) {
@@ -1079,7 +1081,7 @@ window.choisirAttaque = async function(weekend, matchId, cibleUid) {
   if (cibleUid === currentUser.uid) return toast('Tu ne peux pas t\'attaquer toi-même', true);
   const match = matchs.find(m => m.id === matchId);
   if (!match) return;
-  if (!estVerrouilleH12Weekend(match)) return toast('Les pronos ne sont pas encore révélés (avant H-12)', true);
+  if (!estVerrouilleH12Weekend(match)) return toast('Les pronos ne sont pas encore révélés (avant H-4)', true);
   if (estVerrouille(match)) return toast('🔒 Trop tard, le match a commencé', true);
   const choixWeekend = attaques[weekend] || {};
   // Max 2 attaques reçues par cible sur tout le weekend (pas juste sur ce match)
@@ -1138,7 +1140,7 @@ function renderAttaque() {
 
       contenu = `
         <div class="cible-choisie-box">🗡️ Tu attaques <strong>${ciblePseudo}</strong> sur <strong>${mAttaque ? mAttaque.dom + ' vs ' + mAttaque.ext : '?'}</strong></div>
-        ${!matchCommence ? `<button class="btn btn-rouge" style="margin-top:8px" onclick="annulerAttaque('${weekend}')">Annuler</button>` : ''}
+        ${!matchCommence ? `<button class="btn btn-rouge" style="margin-top:8px" onclick="annulerAttaque('${jsq(weekend)}')">Annuler</button>` : ''}
         ${attaquesRecues}`;
 
     } else if (fenetreOuverte) {
@@ -1159,14 +1161,14 @@ function renderAttaque() {
               <div>${m.dom} vs ${m.ext} ${isDouble ? '<span class="double-badge">x2</span>' : ''}</div>
               <div style="color:${hasProno ? 'var(--or)' : 'var(--texte-gris)'}">Prono : ${hasProno ? p.dom + ' - ' + p.ext : '—'}</div>
             </div>
-            ${dispo ? `<button class="btn btn-rouge" style="font-size:0.72rem;padding:5px 10px" onclick="choisirAttaque('${weekend}','${m.id}','${uid}')">🗡️ Attaquer</button>` :
+            ${dispo ? `<button class="btn btn-rouge" style="font-size:0.72rem;padding:5px 10px" onclick="choisirAttaque('${jsq(weekend)}','${m.id}','${uid}')">🗡️ Attaquer</button>` :
               !hasProno ? '<span style="font-size:0.72rem;color:var(--texte-gris)">Pas de prono</span>' :
               !issuesDiff ? '<span style="font-size:0.72rem;color:var(--texte-gris)">Même issue</span>' :
               '<span style="font-size:0.72rem;color:var(--texte-gris)">Max 2 attaques</span>'}
           </div>`;
         }).join('');
 
-        const arcId = `att-${weekend}-${uid}`.replace(/\s/g,'-');
+        const arcId = `att-${weekend}-${uid}`.replace(/[^A-Za-z0-9_-]/g,'-');
         return `
         <div class="archive-item" style="margin-bottom:6px">
           <div class="archive-header" onclick="toggleArchive('${arcId}',this)">
@@ -1195,8 +1197,8 @@ function renderAttaque() {
 
     } else if (matchsEnAttente.length) {
       const premier = matchsEnAttente.reduce((min, m) => new Date(m.heure) < new Date(min.heure) ? m : min, matchsEnAttente[0]);
-      const h12 = new Date(new Date(premier.heure).getTime() - 12 * 60 * 60 * 1000);
-      contenu = `<div style="color:var(--texte-gris);font-size:0.83rem">⏳ Pronos révélés et attaques possibles le ${h12.toLocaleString('fr-FR', {weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} (H-12)</div>`;
+      const h12 = new Date(new Date(premier.heure).getTime() - 4 * 60 * 60 * 1000);
+      contenu = `<div style="color:var(--texte-gris);font-size:0.83rem">⏳ Pronos révélés et attaques possibles le ${h12.toLocaleString('fr-FR', {weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} (H-4)</div>`;
     } else {
       contenu = `<div style="color:var(--texte-gris);font-size:0.83rem">🔒 Weekend terminé</div>`;
     }
@@ -1204,7 +1206,7 @@ function renderAttaque() {
     return `
     <div class="attaque-card ${monAttaque ? 'choisie' : ''} ${matchsPasses.length === matchsWeekend.length ? 'fermee' : ''}">
       <div class="attaque-journee-titre">${weekend} ${getMatchDoubleWeekend(weekend) && fenetreOuverte ? '<span class="double-badge" style="font-size:0.7rem">🎲 Match double révélé</span>' : ''}</div>
-      <div class="attaque-sous">${fenetreOuverte ? '🔓 Fenêtre d\'attaque ouverte' : matchsPasses.length === matchsWeekend.length ? '🔒 Weekend terminé' : '⏳ En attente de H-12'}</div>
+      <div class="attaque-sous">${fenetreOuverte ? '🔓 Fenêtre d\'attaque ouverte' : matchsPasses.length === matchsWeekend.length ? '🔒 Weekend terminé' : '⏳ En attente de H-4'}</div>
       ${contenu}
     </div>`;
   }).join('');
@@ -1288,7 +1290,7 @@ function renderMesPronos() {
         ` : `
           <span style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;color:var(--or)">${p.dom ?? '?'} - ${p.ext ?? '?'}</span>
         `}
-        ${!lockedH4 && m.weekend ? `<button class="coeur-btn ${monCoeurWeekend(m.weekend) === m.id ? 'actif' : ''}" onclick="toggleCoeur('${m.weekend}','${m.id}')" title="Doubler les points de ce match">${monCoeurWeekend(m.weekend) === m.id ? '❤️' : '🤍'}</button>` : m.weekend && monCoeurWeekend(m.weekend) === m.id ? '<span>❤️ x2</span>' : ''}
+        ${!lockedH4 && m.weekend ? `<button class="coeur-btn ${monCoeurWeekend(m.weekend) === m.id ? 'actif' : ''}" onclick="toggleCoeur('${jsq(m.weekend)}','${m.id}')" title="Doubler les points de ce match">${monCoeurWeekend(m.weekend) === m.id ? '❤️' : '🤍'}</button>` : m.weekend && monCoeurWeekend(m.weekend) === m.id ? '<span>❤️ x2</span>' : ''}
         ${badge}
       </div>
       ${groupePronos}
@@ -1349,7 +1351,7 @@ function renderMesPronos() {
     html += weekends.map(we => {
       const matchsW = passes.filter(m => m.weekend === we);
       const qsFermees = questionsFermees.filter(([, q]) => q.weekend === we);
-      const arcId = `prono-arc-${we.replace(/\s/g,'-')}`;
+      const arcId = `prono-arc-${we.replace(/[^A-Za-z0-9_-]/g,'-')}`;
       return `
       <div class="archive-item" style="margin-bottom:8px">
         <div class="archive-header" onclick="toggleArchive('${arcId}', this)">
@@ -1381,7 +1383,7 @@ function renderMesPronos() {
     if (journeesSansWE.length) {
       html += journeesSansWE.map(j => {
         const matchsJ = passesSansWE.filter(m => m.journee === j);
-        const arcId = `prono-arc-old-${j.replace(/\s/g,'-')}`;
+        const arcId = `prono-arc-old-${j.replace(/[^A-Za-z0-9_-]/g,'-')}`;
         return `
         <div class="archive-item" style="margin-bottom:8px">
           <div class="archive-header" onclick="toggleArchive('${arcId}', this)">
@@ -1635,14 +1637,14 @@ function renderArchives() {
 
     return `
     <div class="archive-item" style="border-left:3px solid ${weColor}">
-      <div class="archive-header" onclick="toggleArchive('arc-${we.replace(/\s/g,'-')}', this)">
+      <div class="archive-header" onclick="toggleArchive('arc-${we.replace(/[^A-Za-z0-9_-]/g,'-')}', this)">
         <div>
           <span class="archive-titre" style="color:${weColor}">🗓️ ${we}</span>
           <span style="font-size:0.72rem;color:var(--texte-gris);margin-left:8px">${termines}/${matchsW.length} matchs · ${joueursAvecPronos.length} joueur(s)${matchDoubleNom ? ' · 🎲 ' + matchDoubleNom.dom + ' vs ' + matchDoubleNom.ext : ''}</span>
         </div>
         <span class="archive-chevron">▼</span>
       </div>
-      <div class="archive-body" id="arc-${we.replace(/\s/g,'-')}">
+      <div class="archive-body" id="arc-${we.replace(/[^A-Za-z0-9_-]/g,'-')}">
         ${rows ? `<table class="classement-table" style="margin-top:4px">
           <thead><tr><th>#</th><th>Joueur</th><th>Pts</th><th>✓</th><th>~</th><th>🗡️</th><th>💀</th></tr></thead>
           <tbody>${rows}</tbody>
@@ -1653,7 +1655,7 @@ function renderArchives() {
 }
 
 window.toggleArchive = function(id, header) {
-  const body = document.getElementById(id.replace(/\s/g,'-'));
+  const body = document.getElementById(id.replace(/[^A-Za-z0-9_-]/g,'-'));
   const chevron = header.querySelector('.archive-chevron');
   if (!body) return;
   body.classList.toggle('open');
@@ -1702,11 +1704,11 @@ window.supprimerQuestion = async function(qId) {
 window.repondreQuestion = async function(qId, idx) {
   const q = questions[qId];
   if (!q) return;
-  // Vérifie H-12 de la journée de la question
+  // Vérifie H-4 de la journée de la question
   const matchsW = matchs.filter(m => m.weekend === q.weekend);
   if (matchsW.length) {
     const heureVerrou = getHeureVerrouilWeekend(q.weekend);
-    if (heureVerrou && new Date() >= heureVerrou) return toast('🔒 Réponses fermées (H-12 atteint)', true);
+    if (heureVerrou && new Date() >= heureVerrou) return toast('🔒 Réponses fermées (H-4 atteint)', true);
   }
   // Vérifie si bonne réponse déjà définie
   if (q.reponseCorrecte !== null && q.reponseCorrecte !== undefined) return toast('🔒 La bonne réponse a déjà été donnée', true);
@@ -1913,7 +1915,7 @@ function renderQuestionsTab() {
     html += weekends.map(we => {
       const qsWE = fermees.filter(([,q]) => q.weekend === we);
       const weColor = getWeekendColor(we);
-      const arcId = `q-arc-${we.replace(/\s/g,'-')}`;
+      const arcId = `q-arc-${we.replace(/[^A-Za-z0-9_-]/g,'-')}`;
       return `
       <div class="archive-item" style="margin-bottom:8px;border-left:3px solid ${weColor}">
         <div class="archive-header" onclick="toggleArchive('${arcId}',this)">
@@ -1994,7 +1996,7 @@ window.afficherPronosJoueur = function() {
       return `
       <div class="archive-item" style="margin-bottom:8px;border-left:3px solid ${weColor}">
         <div style="padding:12px 16px;color:var(--texte-gris);font-size:0.83rem">
-          🗓️ <strong style="color:${weColor}">${we}</strong> — 🔒 Pronos masqués (avant H-12)
+          🗓️ <strong style="color:${weColor}">${we}</strong> — 🔒 Pronos masqués (avant H-4)
         </div>
       </div>`;
     }
@@ -2019,7 +2021,7 @@ window.afficherPronosJoueur = function() {
       </div>`;
     }).join('');
 
-    const arcId = `jp-${we.replace(/\s/g,'-')}`;
+    const arcId = `jp-${we.replace(/[^A-Za-z0-9_-]/g,'-')}`;
     return `
     <div class="archive-item" style="margin-bottom:8px;border-left:3px solid ${weColor}">
       <div class="archive-header" onclick="toggleArchive('${arcId}', this)">
